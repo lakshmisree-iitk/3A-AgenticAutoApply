@@ -38,6 +38,12 @@ NAME_EXCLUSIONS = [
 ]
 _COMPILED_NAME_EXCL = [re.compile(p) for p in NAME_EXCLUSIONS]
 
+
+def is_other_name(label: str) -> bool:
+    """True when the label asks for someone ELSE's name (referrer, recruiter,
+    employee, ...) or an organization's name. Such fields are left blank."""
+    return any(p.search((label or "").lower()) for p in _COMPILED_NAME_EXCL)
+
 # category -> regexes; a match means NEVER auto-answer
 SENSITIVE_PATTERNS: dict[str, list[str]] = {
     "work_authorization": [

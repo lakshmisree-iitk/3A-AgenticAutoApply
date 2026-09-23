@@ -8,7 +8,7 @@ items unless the user explicitly answered them. Never submits.
 from __future__ import annotations
 
 from applybot.adapters.base import FillResult, Need
-from applybot.sensitive import classify
+from applybot.sensitive import classify, is_other_name
 
 LABEL_JS = """(el) => {
   const label = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
@@ -120,6 +120,10 @@ class GenericAdapter:
                                  options=el.evaluate(OPTIONS_JS))
                         )
                 else:
+                    # Someone else's name / org name: leave blank, never park.
+                    if verdict == "unknown" and is_other_name(label):
+                        result.notes.append(f"left blank (no referrer): {label}")
+                        continue
                     # Standing answers for open-text questions (explicit only).
                     stood = self._standing_text(
                         label, ctype, verdict, detail, standing, pay_range)
