@@ -65,8 +65,14 @@ LABEL_JS = """(el) => {
   const wrap = el.closest('label');
   const fieldset = el.closest('fieldset');
   const legend = fieldset ? fieldset.querySelector('legend') : null;
+  const lb = el.getAttribute('aria-labelledby') || '';
+  const lbText = lb.split(/\\s+/).map(id => {
+    const n = id && document.getElementById(id);
+    return n ? n.innerText : '';
+  }).join(' ');
   return [
     el.getAttribute('aria-label') || '',
+    lbText,
     el.getAttribute('placeholder') || '',
     label ? label.innerText : '',
     legend ? legend.innerText : '',
@@ -95,14 +101,20 @@ VISIBLE_JS = """(el) => {
 }"""
 
 GROUP_CTX_JS = """(el) => {
-  // Nearest ancestor that reads like one question block (used to group
-  // options that share no fieldset/name, e.g. Ashby checkbox lists).
-  let n = el.parentElement;
+  // Question text near a control, for grouping options that share no
+  // fieldset/name (e.g. Ashby checkbox lists) and for standing-answer
+  // matching. A targeted known-question pattern wins; otherwise the
+  // nearest block-sized ancestor. An option's own short wrapper is skipped
+  // so every option in one question resolves to the same text.
+  const norm = (n) => (n.innerText || '').replace(/\\s+/g, ' ').trim();
+  let n = el.parentElement, fallback = '';
   for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
-    const t = (n.innerText || '').replace(/\\s+/g, ' ').trim();
-    if (t.length >= 20 && t.length <= 1200) return t;
+    const t = norm(n);
+    if (t.length < 25 || t.length > 1200) continue;
+    if (/how did you hear/i.test(t)) return t;
+    if (!fallback) fallback = t;
   }
-  return '';
+  return fallback;
 }"""
 
 JS_LABEL_CLICK = "(el) => { const t = (el.labels && el.labels[0]) || el; t.click(); }"
@@ -265,7 +277,8 @@ class GenericAdapter:
     # -- standing answers (the user's explicit, reusable answers) ---------
     OPT_TEXT_JS = """(b) => {
       const w = b.closest('label');
-      return ((w ? w.innerText : '') + ' ' + (b.value || '') + ' '
+      const lab = (b.labels && b.labels[0]) ? b.labels[0].innerText : '';
+      return ((w ? w.innerText : '') + ' ' + lab + ' ' + (b.value || '') + ' '
               + (b.getAttribute('aria-label') || '')).replace(/\\s+/g, ' ').trim();
     }"""
 
@@ -280,6 +293,9 @@ class GenericAdapter:
         if not standing:
             return False
         low = f"{label} {ctx}".lower()
+        # Ashby-style controls often carry only the option text; classify
+        # with the question text for the branch conditions below.
+        verdict, detail = classify(low)
         name = el.get_attribute("name") or ""
         if name:
             boxes = page.query_selector_all(f'input[type={ctype}][name="{name}"]')

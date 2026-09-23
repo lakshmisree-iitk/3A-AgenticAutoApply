@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<form>
+  <!-- Ashby-style: checkbox options share no name/fieldset -->
+  <div class="question">
+    <h3 id="q-hear">How did you hear about Acme?*</h3>
+    <div><input type="checkbox" id="cb0" aria-labelledby="q-hear"><label for="cb0">LinkedIn</label></div>
+    <div><input type="checkbox" id="cb1" aria-labelledby="q-hear"><label for="cb1">Job board</label></div>
+    <div><input type="checkbox" id="cb2" aria-labelledby="q-hear"><label for="cb2">Other (please specify)</label></div>
+  </div>
+  <div class="question">
+    <h3 id="q-other">If you selected "Other" above please specify how you heard about Acme.</h3>
+    <textarea id="other-spec" aria-labelledby="q-other" placeholder="Type here..."></textarea>
+  </div>
+  <!-- Ashby-style: visually-hidden radios driven by label pills -->
+  <div class="question">
+    <h3 id="q-wa">Are you legally authorized to work in the United States?*</h3>
+    <input type="radio" id="wa-yes" name="wa" value="Yes" aria-labelledby="q-wa"
+           style="position:absolute;opacity:0;width:0;height:0;">
+    <label for="wa-yes">Yes</label>
+    <input type="radio" id="wa-no" name="wa" value="No" aria-labelledby="q-wa"
+           style="position:absolute;opacity:0;width:0;height:0;">
+    <label for="wa-no">No</label>
+  </div>
+  <div class="question">
+    <h3 id="q-spons">Will you now, or in the future, require sponsorship for employment visa
+        status (e.g. H-1B, TN visa status)?*</h3>
+    <textarea id="spons" aria-labelledby="q-spons" placeholder="Type here..."></textarea>
+  </div>
+  <!-- company name in the question must NOT trigger the no-referrer blank -->
+  <div class="question">
+    <h3 id="q-office">Acme is an in-office company. Are you comfortable working from our
+        office around 4-5 days per week?*</h3>
+    <input type="text" id="inoffice" aria-labelledby="q-office" placeholder="Type here...">
+  </div>
+  <div class="question">
+    <h3 id="q-comp">Please provide a range of your compensation expectations.*</h3>
+    <input type="text" id="comp" aria-labelledby="q-comp" placeholder="Type here...">
+  </div>
+  <!-- Ashby-style: Yes/No rendered as buttons, not inputs -->
+  <div class="question">
+    <h3>Are you willing to relocate?*</h3>
+    <button type="button">Yes</button>
+    <button type="button">No</button>
+  </div>
+  <div class="question">
+    <h3 id="q-rec">If you were contacted by a recruiter, please specify who.</h3>
+    <input type="text" id="rec" aria-labelledby="q-rec" placeholder="Type here...">
+  </div>
+</form>
+</body></html>
