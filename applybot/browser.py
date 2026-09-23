@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from typing import Iterator
+from urllib.parse import urlparse
 
 LOGIN_MARKERS = [
     "log in to apply",
@@ -33,6 +35,27 @@ def detect_blockers(page) -> str | None:
     return None
 
 
+def _proxy_config() -> dict | None:
+    """Proxy for the browser, if the environment requires one.
+
+    Playwright does not read proxy env vars itself. Honor APPLYBOT_PROXY
+    first, then the standard HTTPS_PROXY/https_proxy. Returns None when no
+    proxy is configured, which keeps local runs proxy-free.
+    """
+    raw = os.environ.get("APPLYBOT_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    if not raw:
+        return None
+    u = urlparse(raw)
+    if not u.hostname:
+        return None
+    cfg: dict = {"server": f"{u.scheme or 'http'}://{u.hostname}:{u.port or 8080}"}
+    if u.username:
+        cfg["username"] = u.username
+    if u.password:
+        cfg["password"] = u.password
+    return cfg
+
+
 @contextmanager
 def launch(headless: bool = True) -> Iterator:
     """Yield a (playwright, browser, page) triple; cleans up on exit."""
@@ -41,7 +64,9 @@ def launch(headless: bool = True) -> Iterator:
     with sync_playwright() as pw:
         # channel="chromium" runs the full Chromium build headless
         # (the separate headless-shell binary may not be downloaded).
-        browser = pw.chromium.launch(headless=headless, channel="chromium")
+        browser = pw.chromium.launch(
+            headless=headless, channel="chromium", proxy=_proxy_config()
+        )
         context = browser.new_context(
             viewport={"width": 1366, "height": 900},
             user_agent=(
