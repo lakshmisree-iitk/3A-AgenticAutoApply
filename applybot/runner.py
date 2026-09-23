@@ -1,11 +1,13 @@
 """Orchestration: the state machine that mirrors a supervised assistant.
 
-  apply   -> fill safe fields, upload resume, park at review (never submits)
+  apply   -> fill safe fields, upload resume; auto-submits when the form is
+             clean (Sree's explicit call, 2026-09-22). --park stops at review.
   answer  -> record the user's explicit answers to needs_input questions
-  approve -> record explicit approval to submit (who + when)
-  submit  -> only runs when approved; clicks submit and verifies
+  approve -> manual override: record explicit approval to submit (who + when)
+  submit  -> manual override: only runs when approved
 
-Every run writes a log + screenshots under runs/<job_id>/<timestamp>/.
+Sensitive/unknown fields still become needs_input items and are never
+guessed. Every run writes a log + screenshots under runs/<job_id>/<ts>/.
 """
 
 from __future__ import annotations
@@ -33,7 +35,13 @@ class Runner:
         self.store = store or Store()
 
     # -- apply ----------------------------------------------------------
-    def apply(self, job_path: str, headless: bool = True) -> dict:
+    def apply(self, job_path: str, headless: bool = True,
+              auto_submit: bool = True) -> dict:
+        """Fill the form; when clean, submit automatically (Sree's call).
+
+        Sensitive/unknown fields still become needs_input items and are never
+        guessed. Pass auto_submit=False (CLI: --park) to stop at review.
+        """
         job = JobSpec.load(job_path)
         profile = load_profile()
         run_dir = self.store.run_dir(job.id)
@@ -97,8 +105,10 @@ class Runner:
                         say(f"  - [{n['kind']}] {n['label']}")
                     self.store.transition(job.id, "needs_input",
                                           f"{len(data['needs'])} questions open")
+                elif auto_submit:
+                    self._do_submit(page, job, run_dir, say)
                 else:
-                    say("PARKED at review. Run `approve` then `submit` to finish.")
+                    say("PARKED at review (--park).")
                     self.store.transition(job.id, "ready_for_review",
                                           "all fields filled or uploaded")
         except Exception as exc:  # noqa: BLE001
@@ -128,6 +138,8 @@ class Runner:
         return data
 
     # -- approve / submit ----------------------------------------------
+    # NOTE: as of 2026-09-22 the default flow auto-submits once the form is
+    # clean (Sree's explicit call). approve/submit remain as manual overrides.
     def approve(self, job_id: str, approver: str) -> dict:
         data = self.store.load(job_id)
         if data.get("state") not in ("ready_for_review", "needs_input"):
@@ -146,6 +158,7 @@ class Runner:
         return self.store.load(job_id)
 
     def submit(self, job_id: str, job_path: str, headless: bool = True) -> dict:
+        """Manual submit override: still requires a recorded approval."""
         data = self.store.load(job_id)
         if data.get("state") != "approved" or not data.get("approval"):
             raise SystemExit(
@@ -154,35 +167,44 @@ class Runner:
             )
         job = JobSpec.load(job_path)
         run_dir = self.store.run_dir(job.id)
-        self.store.transition(job.id, "submitting", "clicking submit")
+
+        def say(msg: str) -> None:
+            print(msg)
+
         try:
             with B.launch(headless=headless) as page:
                 page.goto(job.url, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(3000)
-                # re-fill to be safe (idempotent), then click submit
+                # re-fill to be safe (idempotent), then submit
                 profile = load_profile()
                 adapter = pick(page, job.ats)
                 adapter.fill(page, profile, job.resume_pdf, data.get("answers", {}))
-                clicked = self._click_submit(page)
-                if not clicked:
-                    raise RuntimeError("could not find a submit button")
-                page.wait_for_timeout(5000)
-                page.screenshot(path=str(run_dir / "submitted.png"), full_page=True)
-                text = (page.content() or "").lower()
-                if any(m in text for m in SUCCESS_MARKERS):
-                    self.store.transition(job.id, "submitted", "confirmation detected")
-                    print(f"{job_id}: SUBMITTED and confirmed.")
-                else:
-                    self.store.transition(
-                        job.id, "failed",
-                        "clicked submit but no confirmation marker found; "
-                        "check runs/<job>/<ts>/submitted.png",
-                    )
-                    print(f"{job_id}: submit clicked but NOT confirmed - check screenshot.")
+                self._do_submit(page, job, run_dir, say)
         except Exception as exc:  # noqa: BLE001
             self.store.transition(job.id, "failed", str(exc)[:500])
             print(f"{job_id}: submit failed: {exc}")
         return self.store.load(job_id)
+
+    def _do_submit(self, page, job, run_dir, say) -> None:
+        """Click submit in the live form and verify a confirmation marker."""
+        self.store.transition(job.id, "submitting", "clicking submit (auto)")
+        clicked = self._click_submit(page)
+        if not clicked:
+            raise RuntimeError("could not find a submit button")
+        page.wait_for_timeout(5000)
+        page.screenshot(path=str(run_dir / "submitted.png"), full_page=True)
+        text = (page.content() or "").lower()
+        if any(m in text for m in SUCCESS_MARKERS):
+            self.store.transition(job.id, "submitted",
+                                  "confirmation detected (auto-submit)")
+            say(f"{job.id}: SUBMITTED and confirmed.")
+        else:
+            self.store.transition(
+                job.id, "failed",
+                "clicked submit but no confirmation marker found; "
+                f"check {run_dir / 'submitted.png'}",
+            )
+            say(f"{job.id}: submit clicked but NOT confirmed - check screenshot.")
 
     def _click_submit(self, page) -> bool:
         for label in SUBMIT_LABELS:

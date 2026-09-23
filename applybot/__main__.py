@@ -1,15 +1,14 @@
 """CLI: python -m applybot <command> ...
 
   init                     create profile.yaml from the example
-  apply --job jobs/x.json  fill the form, upload resume, park at review
+  apply --job jobs/x.json  fill the form; auto-submits when clean
+                           (--park to stop at review instead)
   status --job-id x        show current state + open questions
   answer --job-id x --answers '{"q1": "Yes"}'
                            record your explicit answers, then re-run with resume
   resume --job-id x --job jobs/x.json
-  approve --job-id x --by "Sree"
-                           record explicit approval to submit
-  submit --job-id x --job jobs/x.json
-                           submit (refuses without approval)
+  approve --job-id x --by "Sree"   manual override (rarely needed now)
+  submit --job-id x --job jobs/x.json   manual override, needs approval
 """
 
 from __future__ import annotations
@@ -30,9 +29,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("init", help="create profile.yaml from the example")
 
-    p = sub.add_parser("apply", help="fill the form and park at review")
+    p = sub.add_parser("apply", help="fill the form; auto-submits when clean")
     p.add_argument("--job", required=True, help="path to job spec yaml/json")
     p.add_argument("--headed", action="store_true", help="show the browser")
+    p.add_argument("--park", action="store_true",
+                   help="stop at the review screen instead of auto-submitting")
 
     p = sub.add_parser("status", help="show state and open questions")
     p.add_argument("--job-id", required=True)
@@ -45,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--job-id", required=True)
     p.add_argument("--job", required=True)
     p.add_argument("--headed", action="store_true")
+    p.add_argument("--park", action="store_true",
+                   help="stop at the review screen instead of auto-submitting")
 
     p = sub.add_parser("approve", help="record explicit approval to submit")
     p.add_argument("--job-id", required=True)
@@ -70,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "apply":
-        runner.apply(args.job, headless=not args.headed)
+        runner.apply(args.job, headless=not args.headed,
+                     auto_submit=not args.park)
         return 0
 
     if args.cmd == "status":
@@ -96,7 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "resume":
-        runner.apply(args.job, headless=not args.headed)
+        runner.apply(args.job, headless=not args.headed,
+                     auto_submit=not args.park)
         return 0
 
     if args.cmd == "approve":

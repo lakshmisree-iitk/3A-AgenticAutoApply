@@ -24,19 +24,20 @@ Fill in `profile.yaml` with contact details only. Sensitive answers
 ## Usage
 
 ```bash
-# 1. Fill the form, upload the tailored resume, park at review
+# 1. Fill the form and upload the tailored resume.
+#    Sensitive/unknown questions park as needs_input (never guessed).
+#    Once the form is clean, it submits automatically and verifies.
 python -m applybot apply --job jobs/amazon-10518364.yaml
 
 # 2. See what's waiting on you
 python -m applybot status --job-id amazon-10518364
 
-# 3. Answer the open questions explicitly, then re-run the fill
+# 3. Answer the open questions explicitly, then re-run (auto-submits when clean)
 python -m applybot answer --job-id amazon-10518364 --answers '{"sponsorship": "Yes"}'
 python -m applybot resume --job-id amazon-10518364 --job jobs/amazon-10518364.yaml
 
-# 4. Approve, then submit (submit refuses without approval)
-python -m applybot approve --job-id amazon-10518364 --by "Sree"
-python -m applybot submit --job-id amazon-10518364 --job jobs/amazon-10518364.yaml
+# Stop at the review screen instead of auto-submitting:
+python -m applybot apply --job jobs/x.yaml --park
 ```
 
 ## Safety rules (enforced in code)
@@ -45,9 +46,11 @@ python -m applybot submit --job-id amazon-10518364 --job jobs/amazon-10518364.ya
 - **Sensitive** fields (work authorization, citizenship, compensation,
   EEO/demographics, background, attestations) are never auto-answered.
 - **Unknown** fields are never guessed.
-- Both become `needs_input` items for you to answer explicitly.
+- Both become `needs_input` items for you to answer explicitly; submission
+  waits until they are answered.
+- Submission is verified against confirmation markers and screenshotted;
+  every run is logged under `runs/<job>/<timestamp>/` for audit.
 - Login walls and CAPTCHAs stop the run as `blocked`.
-- Every run logs to `runs/<job>/<timestamp>/` with screenshots.
 - State lives in `state/<job>.json`, outside the model.
 
 ## Never commit
