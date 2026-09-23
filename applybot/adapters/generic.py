@@ -83,10 +83,33 @@ OPTIONS_JS = """(el) => {
 }"""
 
 VISIBLE_JS = """(el) => {
-  const r = el.getBoundingClientRect();
-  const s = window.getComputedStyle(el);
-  return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  const vis = (n) => {
+    const r = n.getBoundingClientRect();
+    const s = window.getComputedStyle(n);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+  };
+  if (vis(el)) return true;
+  // Ashby-style: visually-hidden input driven by a visible label pill.
+  const lab = el.labels && el.labels[0];
+  return !!(lab && vis(lab));
 }"""
+
+GROUP_CTX_JS = """(el) => {
+  // Nearest ancestor that reads like one question block (used to group
+  // options that share no fieldset/name, e.g. Ashby checkbox lists).
+  let n = el.parentElement;
+  for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
+    const t = (n.innerText || '').replace(/\\s+/g, ' ').trim();
+    if (t.length >= 20 && t.length <= 1200) return t;
+  }
+  return '';
+}"""
+
+JS_LABEL_CLICK = "(el) => { const t = (el.labels && el.labels[0]) || el; t.click(); }"
+
+# "If you selected 'Other' above, please specify..." — only relevant when
+# the Other option is actually checked.
+OTHER_COND_RE = re.compile(r'if you selected.*other', re.I)
 
 
 class GenericAdapter:
@@ -118,6 +141,14 @@ class GenericAdapter:
                 if not label:
                     continue
 
+                # Conditional "if you selected Other..." box: skip unless the
+                # Other option is actually checked.
+                if ctype not in ("radio", "checkbox") and OTHER_COND_RE.search(label):
+                    if not self._other_option_checked(page):
+                        result.notes.append(
+                            f"skipped (Other not selected): {label[:60]}")
+                        continue
+
                 # Resume upload
                 if ctype == "file":
                     el.set_input_files(resume_pdf)
@@ -140,13 +171,15 @@ class GenericAdapter:
                 # Radios / checkboxes: never auto-fill, except from her
                 # explicit standing answers (matched conservatively).
                 if ctype in ("radio", "checkbox"):
-                    group = el.get_attribute("name") or field_id
+                    name = el.get_attribute("name") or ""
+                    ctx = el.evaluate(GROUP_CTX_JS) or ""
+                    group = name if name else (f"ctx:{ctx[:80]}" if ctx else field_id)
                     if group in seen_radio_groups:
                         continue
                     seen_radio_groups.add(group)
                     verdict, detail = classify(label)
                     if self._apply_standing_group(
-                            page, el, ctype, label, verdict, detail,
+                            page, el, ctype, label, ctx, verdict, detail,
                             standing, result):
                         continue
                     kind = f"sensitive:{detail}" if verdict == "sensitive" else "unknown"
@@ -174,16 +207,16 @@ class GenericAdapter:
                                  options=el.evaluate(OPTIONS_JS))
                         )
                 else:
-                    # Someone else's name / org name: leave blank, never park.
-                    if verdict == "unknown" and is_other_name(label):
-                        result.notes.append(f"left blank (no referrer): {label}")
-                        continue
-                    # Standing answers for open-text questions (explicit only).
+                    # Her explicit standing answers win over heuristics.
                     stood = self._standing_text(
                         label, ctype, verdict, detail, standing, pay_range)
                     if stood:
                         self._apply_answer(el, ctype, stood)
                         result.filled.append(f"{label} -> [standing answer]")
+                        continue
+                    # Someone else's name / org name: leave blank, never park.
+                    if verdict == "unknown" and is_other_name(label):
+                        result.notes.append(f"left blank (no referrer): {label}")
                         continue
                     kind = f"sensitive:{detail}" if verdict == "sensitive" else "unknown"
                     result.needs.append(
@@ -194,6 +227,9 @@ class GenericAdapter:
             except Exception as exc:  # noqa: BLE001 - one bad field never kills the run
                 result.notes.append(f"skipped a control ({exc})")
 
+        # Ashby-style Yes/No pill toggles rendered as <button>s, not inputs.
+        self._fill_button_toggles(page, standing, result)
+
         return result
 
     def _apply_answer(self, el, ctype: str, value: str) -> None:
@@ -202,8 +238,15 @@ class GenericAdapter:
             el.select_option(label=value)
         elif ctype == "checkbox":
             want = str(value).strip().lower() in ("yes", "true", "1", "checked")
-            if el.is_checked() != want:
-                el.check() if want else el.uncheck()
+            try:
+                if el.is_checked() != want:
+                    el.check() if want else el.uncheck()
+            except Exception:  # noqa: BLE001 - hidden input: click via label
+                el.evaluate(
+                    "(el, v) => { if (el.checked !== v) {"
+                    " const t = (el.labels && el.labels[0]) || el; t.click(); } }",
+                    want,
+                )
         elif ctype == "radio":
             # value matches the option label/value within its group
             el.evaluate(
@@ -226,7 +269,7 @@ class GenericAdapter:
               + (b.getAttribute('aria-label') || '')).replace(/\\s+/g, ' ').trim();
     }"""
 
-    def _apply_standing_group(self, page, el, ctype: str, label: str,
+    def _apply_standing_group(self, page, el, ctype: str, label: str, ctx: str,
                               verdict: str, detail: str | None,
                               standing: dict, result) -> bool:
         """Apply a standing answer to a whole radio/checkbox group.
@@ -236,10 +279,18 @@ class GenericAdapter:
         """
         if not standing:
             return False
-        low = label.lower()
+        low = f"{label} {ctx}".lower()
         name = el.get_attribute("name") or ""
-        boxes = (page.query_selector_all(f'input[type={ctype}][name="{name}"]')
-                 if name else [el])
+        if name:
+            boxes = page.query_selector_all(f'input[type={ctype}][name="{name}"]')
+        elif ctx:
+            # Ashby-style: options share no name; take same-type controls
+            # from the same question container.
+            key = ctx[:80]
+            boxes = [b for b in page.query_selector_all(f'input[type={ctype}]')
+                     if (b.evaluate(GROUP_CTX_JS) or "")[:80] == key]
+        else:
+            boxes = [el]
 
         def click_match(want: str) -> bool:
             want = want.strip().lower()
@@ -249,7 +300,10 @@ class GenericAdapter:
                 t = (b.evaluate(self.OPT_TEXT_JS) or "").lower()
                 if want in t:
                     try:
-                        b.check() if ctype == "checkbox" else b.click()
+                        try:
+                            b.check() if ctype == "checkbox" else b.click()
+                        except Exception:  # noqa: BLE001 - hidden input
+                            b.evaluate(JS_LABEL_CLICK)
                     except Exception:  # noqa: BLE001
                         continue
                     return True
@@ -290,6 +344,73 @@ class GenericAdapter:
                     return True
                 return False
         return False
+
+    def _other_option_checked(self, page) -> bool:
+        """True when an 'Other' checkbox option is currently checked."""
+        try:
+            for b in page.query_selector_all("input[type=checkbox]"):
+                t = (b.evaluate(self.OPT_TEXT_JS) or "").lower()
+                if "other" in t:
+                    try:
+                        if b.is_checked():
+                            return True
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _fill_button_toggles(self, page, standing: dict, result) -> None:
+        """Ashby renders some Yes/No questions as <button> pills, not inputs.
+
+        Only the exact question shapes she approved are answered; anything
+        else is left alone (never parked from here — the input pass owns
+        parking).
+        """
+        if not standing:
+            return
+        seen: set[str] = set()
+        for b in page.query_selector_all("button"):
+            try:
+                if not b.evaluate(VISIBLE_JS):
+                    continue
+                text = (b.inner_text() or "").strip().lower()
+                if text not in ("yes", "no"):
+                    continue
+                ctx = b.evaluate(GROUP_CTX_JS) or ""
+                key = ctx[:80]
+                if key in seen:
+                    continue
+                seen.add(key)
+                low = ctx.lower()
+                verdict, detail = classify(low)
+                want = None
+                if verdict == "sensitive" and detail == "work_authorization" \
+                        and "sponsor" not in low:
+                    want = (standing.get("us_work_authorized") or "").strip().lower()
+                elif "relocat" in low:
+                    want = (standing.get("open_to_relocate") or "").strip().lower()
+                if want in ("yes", "no"):
+                    clicked = b.evaluate(
+                        """(el, want) => {
+                          let n = el.parentElement;
+                          for (let i = 0; i < 5 && n; i++, n = n.parentElement) {
+                            const btns = Array.from(n.querySelectorAll('button'));
+                            const names = btns.map(x => (x.innerText || '').trim().toLowerCase());
+                            if (names.includes('yes') && names.includes('no')) {
+                              const t = btns[names.indexOf(want)];
+                              if (t) { t.click(); return true; }
+                              return false;
+                            }
+                          }
+                          return false;
+                        }""",
+                        want,
+                    )
+                    if clicked:
+                        result.filled.append(f"{ctx[:60]}... -> {want} [standing answer]")
+            except Exception:  # noqa: BLE001 - one bad toggle never kills the run
+                continue
 
     def _standing_text(self, label: str, ctype: str, verdict: str,
                        detail: str | None, standing: dict,
