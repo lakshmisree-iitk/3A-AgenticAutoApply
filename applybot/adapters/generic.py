@@ -103,8 +103,10 @@ class GenericAdapter:
         return True  # fallback adapter
 
     def prepare(self, page) -> None:
-        # Ashby-style pages open on an Overview tab; click through to the
-        # real application form (and clear any cookie banner) first.
+        # Temporary scaffold: Ashby-style pages open on an Overview tab;
+        # click through to the real application form (and clear any cookie
+        # banner) first. Phase 2 replaces this with the generic loop, where
+        # the reasoner clicks tabs / Next buttons from the snapshot.
         _reveal_form(page)
 
     def fill(self, page, profile, resume_pdf: str, answered: dict,

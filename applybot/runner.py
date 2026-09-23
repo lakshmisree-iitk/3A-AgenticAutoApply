@@ -210,11 +210,15 @@ class Runner:
         out = run_dir / "snapshot.json"
         out.write_text(json.dumps(inv, indent=2), encoding="utf-8")
         n = len(inv["questions"])
-        print(f"snapshot: {n} questions -> {out}")
+        print(f"snapshot: {n} questions, "
+              f"{len(inv['actions'])} actions -> {out}")
         for q in inv["questions"]:
             kinds = sorted({c["kind"] for c in q["controls"]})
             req = " (required)" if q["required"] else ""
             print(f"  - {q['question'][:80]}{req} [{', '.join(kinds)}]")
+        if inv["actions"]:
+            print("  actions: " + ", ".join(a["label"][:40]
+                                           for a in inv["actions"][:10]))
         return inv
 
     def _do_submit(self, page, job, run_dir, say) -> None:

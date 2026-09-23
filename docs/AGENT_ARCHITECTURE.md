@@ -10,30 +10,44 @@ park what it doesn't, and never submit without Sree's explicit word
 for that run. Curated applications only — Sree names each job; the bot
 never discovers or bulk-applies.
 
-## 2. The agent loop
+## 2. The agent loop (one generic engine, no per-site cases)
 
-Runs per application, and per field inside it:
+There are no ATS adapters in this design — no Ashby case, no Amazon
+case, no Workday case. The bot works the way a personal agent works:
+it looks at whatever page is in front of it, figures out what it is,
+acts, then looks again.
 
-1. **Perceive.** Snapshot the form into a structured inventory: every
-   field's question text, control type, options, required flag.
-   Deterministic DOM extraction — no LLM, this is just eyes.
-2. **Reason.** For each field the agent interrogates itself in writing
-   before touching anything:
+1. **Perceive.** Snapshot the current page into structured data: every
+   question (text, control type, options, required flag) plus every
+   visible action (tabs, Next/Back buttons, links). Deterministic DOM
+   extraction — no LLM, this is just eyes. The snapshot carries no ATS
+   label; the page is the page.
+2. **Reason.** The LLM analyzes the snapshot and decides the next
+   move: fill a field, click a tab, walk a Next button, upload the
+   résumé, report blocked (login wall, CAPTCHA it can't pass), or park
+   at review. For each field it interrogates itself in writing before
+   touching anything:
    - What is this question really asking?
    - What do I know? (profile → standing answers → this job's spec →
      how I answered it on past applications)
    - Is it sensitive? If yes, do I have an explicit standing answer?
      If no → park.
    - What's the risk of answering vs. parking?
-   
+
    It acts only when the answers converge. Never one-shot
    classify-and-fill.
-3. **Act.** Fill one field, read it back to confirm it stuck
-   (React forms lie).
-4. **Verify.** Screenshot plus a field-by-field report: filled, blanked,
-   or parked — with the reasoning attached to each.
+3. **Act.** The runner executes the decided DOM actions only: fill,
+   click, select, upload. The LLM never touches the browser directly;
+   it decides, the runner acts. (Small blast radius, auditable.)
+4. **Verify.** Re-snapshot, confirm the action stuck (React forms lie),
+   attach a screenshot.
 5. **Gate.** Park at review. Submission happens only on Sree's explicit
    approval for that specific run. Ever.
+
+A stepped Workday flow, an Ashby Overview tab, an Amazon login wall —
+these are all just things the snapshot shows and the reasoner handles.
+Site-specific knowledge ("Ashby usually has an Application tab") may
+inform reasoning; it is never a code branch.
 
 ## 3. Two tiers
 
@@ -47,10 +61,10 @@ Runs per application, and per field inside it:
 
 Tier 1 is the reliable 80%; Tier 2 is the judgment for the rest.
 
-## 4. Perceive layer (Phase 1) — ATS-agnostic by construction
+## 4. Perceive layer (Phase 1) — the page is the page
 
-`applybot/perceive.py` → `snapshot_form(page)` returns a question
-inventory:
+`applybot/perceive.py` → `snapshot_form(page)` returns the current
+page as structured data:
 
 ```json
 {"questions": [
@@ -58,75 +72,70 @@ inventory:
    "required": true,
    "controls": [
      {"kind": "checkbox", "label": "LinkedIn", "options": ["LinkedIn", "X", ...],
-      "control_id": "...", "visible": true}]}
-]}
+      "control_id": "..."}]}],
+ "actions": [
+  {"kind": "button", "label": "Submit Application", "control_id": ""}]}
 ```
 
 Rules:
 
-- **DOM-driven, never ATS-driven.** It reads whatever page is in front
+- **DOM-driven, never site-driven.** It reads whatever page is in front
   of it: labels via `label[for]` / wrapping label / `aria-labelledby` /
   `aria-label` / placeholder, options from labels and selects, question
   text from the nearest block-sized ancestor (deep walk, stops at
-  FORM/BODY). No per-ATS field maps.
-- **One page = one snapshot.** Multi-step flows are snapshotted per
-  step; the adapter owns step navigation.
-- Shared extraction primitives live in `perceive.py`; adapters import
-  them (no duplicated JS).
+  FORM/BODY). Navigation controls (buttons, links) are inventoried as
+  actions so the reasoner can click tabs and Next buttons. No per-site
+  field maps, no per-site navigation code.
+- **One page = one snapshot.** The reasoner decides what to do with
+  the page it sees; after acting, it snapshots again.
+- Shared extraction primitives live in `perceive.py`; the old
+  scripted filler imports them (no duplicated JS).
 
-## 5. ATS coverage
+## 5. Why there are no ATS adapters
 
-### Ashby (jobs.ashbyhq.com) — working
+Ashby, Amazon.jobs, Workday, and whatever comes next are all handled
+by the same loop. What used to be "adapter logic" is now just
+reasoning over the snapshot:
 
-- Lands on an Overview tab; the form lives behind the Application tab.
-  Adapter clicks through and dismisses the cookie banner first.
-- Name-less, deeply nested checkbox/radio groups; Yes/No rendered as
-  `<button>` pills; conditional fields rendered twice. All handled in
-  the perceive layer (deep question-text walk, pill-toggle detection).
+- Ashby opens on an Overview tab → the snapshot shows an "Application"
+  action → the reasoner clicks it.
+- Amazon.jobs shows a sign-in wall → the snapshot shows no form, only
+  the wall → the reasoner reports blocked ("sign-in needed") and stops.
+  The bot never handles credentials itself.
+- Workday walks a stepped, multi-section flow → each step snapshots
+  its questions and its Next button → the reasoner fills, clicks Next,
+  repeats.
+- A question the site asks in an unfamiliar shape → the reasoner reads
+  the question text and options and decides fill / blank / park from
+  Sree's rules, same as any other question.
 
-### Amazon.jobs — next surface
-
-Amazon's flow differs structurally, so it gets its own adapter; the
-agent loop and perceive layer do not change:
-
-- **Sign-in gate.** amazon.jobs requires an authenticated session
-  before the application form. The bot never handles credentials
-  itself: it reuses a saved browser session, or parks with
-  "sign-in needed" for Sree. (Her 2026-09-22 application used Google
-  sign-in, which she did herself.)
-- **Stepped, multi-section flow** (not one long form). The Amazon
-  adapter walks sections: snapshot current step → fill → Next →
-  repeat. Each step gets its own inventory, so the reasoning stays
-  per-question, never per-ATS.
-- **Known question shapes** (from her completed 2026-09-22
-  application): work authorization, sponsorship (H-1B transfer),
-  I-140, citizenship, start date, EEO self-identification. Sponsorship
-  and work-auth answers come from standing answers; EEO stays parked
-  unless she says otherwise.
-- DOM specifics to be captured from a live snapshot run and recorded
-  here — no guessing.
-
-### Adding a future ATS
-
-New ATS = new adapter (navigation quirks only: tab clicks, step
-walking, auth gates) + a fixture replicating its DOM shape +
-regression tests. The loop, perceive, reason, memory, and rails are
-untouched.
+The `adapters/` module and its registry are a temporary scaffold
+around the old scripted filler; Phase 2 removes them in favor of the
+single generic loop. The only site-independent special cases that
+remain are **policy**, not site logic: never submit without explicit
+per-run approval, never invent answers, park sensitive questions
+without standing answers, leave referrer fields blank.
 
 ## 6. Reason layer (Phase 2) — the self-questioning agent
 
-- Input: the question inventory from Phase 1 + profile + standing
+- Input: the page snapshot (questions + actions) + profile + standing
   answers + job spec + relevant past answers.
-- One batched Gemini call reasons over every uncertain field and
-  returns, per field: `fill` (with value) | `blank` (referrer-type) |
-  `park` (with the exact question for Sree) — each with its reasoning.
-- The runner executes the decisions: fill + read-back verify, blank,
-  or park. The LLM never touches the browser directly; it only
-  decides, the runner acts. (Small blast radius, auditable.)
+- The LLM reasons over the whole snapshot in **one batched call** and
+  returns the next actions: fill fields (with values and their
+  evidence source), click an action (a tab, a Next button), upload the
+  résumé, report blocked, or park. Per field it returns `fill` |
+  `blank` (referrer-type) | `park` (with the exact question for Sree) —
+  each with its reasoning attached.
+- The runner executes the decided actions, re-snapshots, and verifies.
+  The loop repeats until the form is done or parked. The LLM never
+  touches the browser directly; it only decides, the runner acts.
+  (Small blast radius, auditable.)
 - **Gemini key**: env var at runtime only, never in the repo, never
   logged. "Use tokens as needed" authorized 2026-09-23; cost stays
   bounded via batching + caching (identical question text reuses past
-  reasoning without a new call).
+  reasoning without a new call). The old Tier-1 scripted filler remains
+  as a fast path for safe fields so routine applications don't burn
+  tokens on the obvious.
 
 ## 7. Memory (Phase 3) — this is what makes it "curated"
 
@@ -152,9 +161,11 @@ untouched.
 ## 9. Build phases & status
 
 - [x] Phase 0 — scripted adapter, Ashby live run, standing answers
-- [ ] Phase 1 — perceive layer: `snapshot_form` + `snapshot` CLI
-  (ATS-agnostic; proven on Ashby DOM shape)
-- [ ] Phase 2 — reason layer: batched Gemini self-questioning over
-  the inventory; Amazon.jobs adapter (auth gate + stepped flow)
+- [x] Phase 1 — perceive layer: `snapshot_form` (questions + actions) +
+  `snapshot` CLI. Deliberately site-agnostic.
+- [ ] Phase 2 — reason layer: the generic perceive→reason→act→verify
+  loop over snapshots; LLM decides fills, clicks, uploads, blocked
+  reports; adapters/ registry removed; old scripted filler kept only
+  as a fast path for safe fields
 - [ ] Phase 3 — memory: answer log, standing-answer proposals
 - [ ] Phase 4 — hardening for 24/7 operation

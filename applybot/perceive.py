@@ -149,9 +149,13 @@ def snapshot_form(page) -> dict:
     """Question inventory of the current page.
 
     One page = one snapshot; multi-step flows snapshot per step and the
-    adapter owns step navigation. Returns
-    {"questions": [{"question": str, "required": bool, "controls": [...]}]}
-    in page order.
+    reason layer decides the next action from what it sees (a tab strip,
+    a Next button, a login wall, ...). Returns
+    {"questions": [{"question": str, "required": bool, "controls": [...]}],
+     "actions": [{"kind": "button"|"link", "label": str, "control_id": str}]}
+    in page order. The snapshot deliberately carries no ATS label: the
+    reason layer works from what is on the page, not from which site it
+    thinks it is on.
     """
     groups: dict[str, dict] = {}
     order: list[str] = []
@@ -194,4 +198,36 @@ def snapshot_form(page) -> dict:
             })
         except Exception:  # noqa: BLE001 - one bad control never kills it
             continue
-    return {"questions": [groups[k] for k in order]}
+    return {
+        "questions": [groups[k] for k in order],
+        "actions": snapshot_actions(page),
+    }
+
+
+def snapshot_actions(page) -> list[dict]:
+    """Visible interactive elements that are not form questions: tabs,
+    Next/Back buttons, Apply links, ... The reason layer uses these to
+    navigate (click the Application tab, walk a stepped flow) instead of
+    relying on per-site navigation code."""
+    actions: list[dict] = []
+    seen: set[str] = set()
+    for el in page.query_selector_all("button, a[href]"):
+        try:
+            if not el.evaluate(VISIBLE_JS):
+                continue
+            text = " ".join((el.inner_text() or "").split())
+            if not text:
+                continue
+            tag = el.evaluate("e => e.tagName").lower()
+            key = f"{tag}:{text}"
+            if key in seen:
+                continue
+            seen.add(key)
+            actions.append({
+                "kind": "link" if tag == "a" else "button",
+                "label": text,
+                "control_id": el.get_attribute("id") or "",
+            })
+        except Exception:  # noqa: BLE001 - one bad element never kills it
+            continue
+    return actions

@@ -238,13 +238,18 @@ def test_snapshot():
     assert len(other) == 1, len(other)
     assert len(other[0]["controls"]) == 1
 
-    # resume file control is inventoried, submit button is not
+    # resume file control is inventoried, submit button is not a question
     file_q = next(q for q in qs
                   if any(c["kind"] == "file" for c in q["controls"]))
     assert file_q["controls"][0]["kind"] == "file"
     assert not any("submit application" in q["question"].lower() for q in qs)
 
-    print(f"snapshot: OK ({len(qs)} questions)")
+    # ...but navigation controls ARE inventoried as actions
+    actions = inv["actions"]
+    assert any(a["kind"] == "button" and "submit application" in a["label"].lower()
+               for a in actions), [a["label"] for a in actions]
+
+    print(f"snapshot: OK ({len(qs)} questions, {len(actions)} actions)")
 
 if __name__ == "__main__":
     test_classifier()
