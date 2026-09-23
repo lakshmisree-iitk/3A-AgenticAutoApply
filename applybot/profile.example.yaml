@@ -1,0 +1,17 @@
+# Copy to profile.yaml and fill in. ONLY safe contact fields belong here.
+# NEVER put answers to sensitive questions here (work authorization, visa,
+# compensation, EEO/demographics, background, attestations). Those are asked
+# per application and answered explicitly by you.
+first_name: ""
+last_name: ""
+full_name: ""
+email: ""
+phone: ""
+address: ""
+city: ""
+state: ""
+zip: ""
+country: ""
+linkedin: ""
+website: ""
+github: ""

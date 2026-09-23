@@ -1,0 +1,7 @@
+# Example job spec. Copy per application: jobs/<company>-<id>.yaml
+id: amazon-10518364
+company: Amazon
+role: Delivery Consultant - AI/ML, Professional Services - AWS Industries
+url: https://www.amazon.jobs/en/jobs/10518364/delivery-consultant-ai-ml-professional-services-aws-industries
+resume_pdf: /home/hatch/workspace/job-applications/amazon-10518364/Lakshmisree_Lakshmanan_Resume.pdf
+ats: generic

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html><head><title>Test Application Form</title></head>
+<body>
+<h1>Apply: Test Engineer</h1>
+<form id="app">
+  <label for="fn">First name</label>
+  <input id="fn" name="first_name" type="text">
+
+  <label for="em">Email address</label>
+  <input id="em" name="email" type="email">
+
+  <label for="ph">Phone number</label>
+  <input id="ph" name="phone" type="tel">
+
+  <label for="cv">Resume</label>
+  <input id="cv" name="resume" type="file">
+
+  <fieldset>
+    <legend>Will you now or in the future require sponsorship for employment visa status?</legend>
+    <label><input type="radio" name="sponsorship" value="yes"> Yes</label>
+    <label><input type="radio" name="sponsorship" value="no"> No</label>
+  </fieldset>
+
+  <label for="sal">Desired salary</label>
+  <input id="sal" name="salary" type="text">
+
+  <label><input type="checkbox" name="certify">
+    I certify that the information provided is true and complete.</label>
+
+  <label for="mystery">Blorptitude index</label>
+  <input id="mystery" name="blorptitude" type="text">
+
+  <button type="submit">Submit application</button>
+</form>
+<div id="done" style="display:none">Thank you for applying! Your application has been submitted.</div>
+<script>
+document.getElementById('app').addEventListener('submit', e => {
+  e.preventDefault();
+  document.getElementById('done').style.display = 'block';
+});
+</script>
+</body></html>
