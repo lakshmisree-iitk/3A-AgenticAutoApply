@@ -257,4 +257,10 @@ if __name__ == "__main__":
     test_ashby_style_form()
     test_ashby_realshape_form()
     test_snapshot()
+    from test_agent import (test_agent_guards_and_parks,
+                            test_agent_refuses_submit_click,
+                            test_agent_blocked)
+    test_agent_guards_and_parks()
+    test_agent_refuses_submit_click()
+    test_agent_blocked()
     print("ALL TESTS PASSED")

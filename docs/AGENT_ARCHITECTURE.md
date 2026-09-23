@@ -127,9 +127,11 @@ without standing answers, leave referrer fields blank.
   `blank` (referrer-type) | `park` (with the exact question for Sree) —
   each with its reasoning attached.
 - The runner executes the decided actions, re-snapshots, and verifies.
-  The loop repeats until the form is done or parked. The LLM never
-  touches the browser directly; it only decides, the runner acts.
-  (Small blast radius, auditable.)
+  After any page-changing action (a click, a tab, a Next button), it
+  re-snapshots and the reasoner re-decides before continuing the batch —
+  never fill blindly after the page changed. The loop repeats until the
+  form is done or parked. The LLM never touches the browser directly; it
+  only decides, the runner acts. (Small blast radius, auditable.)
 - **Gemini key**: env var at runtime only, never in the repo, never
   logged. "Use tokens as needed" authorized 2026-09-23; cost stays
   bounded via batching + caching (identical question text reuses past
@@ -163,9 +165,13 @@ without standing answers, leave referrer fields blank.
 - [x] Phase 0 — scripted adapter, Ashby live run, standing answers
 - [x] Phase 1 — perceive layer: `snapshot_form` (questions + actions) +
   `snapshot` CLI. Deliberately site-agnostic.
-- [ ] Phase 2 — reason layer: the generic perceive→reason→act→verify
-  loop over snapshots; LLM decides fills, clicks, uploads, blocked
-  reports; adapters/ registry removed; old scripted filler kept only
-  as a fast path for safe fields
+- [x] Phase 2 — reason layer: the generic perceive→reason→act→verify
+  loop (`reason.py` + `agent.py`). Gemini decides from each snapshot;
+  the runner validates every decision against hard local guards (no
+  submit clicks, sensitive fills need standing/past answers, no
+  password fields), executes, re-snapshots, verifies. Tier 1 stays as
+  the free fast path for safe fields + resume upload. `agent` CLI
+  always parks at review; adapters/ registry is now a documented
+  temporary scaffold.
 - [ ] Phase 3 — memory: answer log, standing-answer proposals
 - [ ] Phase 4 — hardening for 24/7 operation

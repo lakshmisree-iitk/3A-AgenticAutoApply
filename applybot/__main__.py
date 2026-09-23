@@ -40,6 +40,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--job", required=True, help="path to job spec yaml/json")
     p.add_argument("--headed", action="store_true", help="show the browser")
 
+    p = sub.add_parser("agent",
+                       help="run the generic agent loop (always parks at review; never submits)")
+    p.add_argument("--job", required=True, help="path to job spec yaml/json")
+    p.add_argument("--headed", action="store_true", help="show the browser")
+    p.add_argument("--max-steps", type=int, default=12,
+                   help="cap on perceive/reason/act cycles")
+
     p = sub.add_parser("status", help="show state and open questions")
     p.add_argument("--job-id", required=True)
 
@@ -80,6 +87,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "apply":
         runner.apply(args.job, headless=not args.headed,
                      auto_submit=not args.park)
+        return 0
+
+    if args.cmd == "agent":
+        from applybot.agent import run_agent
+        run_agent(args.job, headless=not args.headed,
+                  max_steps=args.max_steps)
         return 0
 
     if args.cmd == "snapshot":
