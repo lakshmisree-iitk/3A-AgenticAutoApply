@@ -49,7 +49,7 @@ class JobSpec:
         for required in ("id", "company", "role", "url", "resume_pdf"):
             if not data.get(required):
                 raise ValueError(f"job spec {path} is missing required key: {required}")
-        resume = Path(data["resume_pdf"])
+        resume = Path(data["resume_pdf"]).expanduser()
         if not resume.exists():
             raise ValueError(f"resume_pdf does not exist: {resume}")
         pr = data.get("pay_range")
