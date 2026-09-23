@@ -7,8 +7,58 @@ items unless the user explicitly answered them. Never submits.
 
 from __future__ import annotations
 
+import re
+
 from applybot.adapters.base import FillResult, Need
 from applybot.sensitive import classify, is_other_name
+
+
+def _dismiss_cookie_banner(page) -> None:
+    """Click a reject/necessary-only cookie button if one is showing."""
+    try:
+        btn = page.get_by_role(
+            "button", name=re.compile(r"necessary only|reject( all)?|decline", re.I)
+        )
+        if btn.count():
+            btn.first.click(timeout=3000)
+            page.wait_for_timeout(500)
+    except Exception:  # noqa: BLE001 - banner may not exist; never fatal
+        pass
+
+
+def _reveal_form(page) -> None:
+    """Make sure the actual application form is visible before filling.
+
+    Ashby-style pages land on an Overview tab; the form lives behind an
+    'Application' tab (or an 'Apply for this Job' button). Without this
+    step the adapter sees zero fields and parks on a page that was never
+    the form. Returns early when form controls already exist.
+    """
+    try:
+        if page.query_selector("form input, form textarea, form select"):
+            return
+        _dismiss_cookie_banner(page)
+        clicked = False
+        for role, pattern in [
+            ("tab", r"^application$"),
+            ("link", r"^application$"),
+            ("button", r"apply for this job"),
+            ("link", r"apply for this job"),
+        ]:
+            try:
+                el = page.get_by_role(role, name=re.compile(pattern, re.I))
+                if el.count():
+                    el.first.click(timeout=5000)
+                    clicked = True
+                    break
+            except Exception:  # noqa: BLE001 - try the next shape
+                continue
+        if clicked:
+            page.wait_for_selector(
+                "form input, form textarea, form select", timeout=15000
+            )
+    except Exception:  # noqa: BLE001 - form genuinely absent; fill reports it
+        pass
 
 LABEL_JS = """(el) => {
   const label = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
@@ -51,6 +101,10 @@ class GenericAdapter:
         result = FillResult()
         seen_radio_groups: set[str] = set()
         standing = standing or {}
+
+        # Ashby-style pages open on an Overview tab; click through to the
+        # real application form (and clear any cookie banner) first.
+        _reveal_form(page)
 
         controls = page.query_selector_all(
             "input, textarea, select"
