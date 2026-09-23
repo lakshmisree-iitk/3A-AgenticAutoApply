@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from applybot.adapters.base import FillResult, Need
-from applybot.sensitive import classify, is_other_name
+from applybot.sensitive import classify
 
 
 def _dismiss_cookie_banner(page) -> None:
@@ -103,18 +103,22 @@ VISIBLE_JS = """(el) => {
 GROUP_CTX_JS = """(el) => {
   // Question text near a control, for grouping options that share no
   // fieldset/name (e.g. Ashby checkbox lists) and for standing-answer
-  // matching. A targeted known-question pattern wins; otherwise the
-  // nearest block-sized ancestor. An option's own short wrapper is skipped
-  // so every option in one question resolves to the same text.
+  // matching. A targeted known-question pattern wins at any reasonable
+  // size; otherwise the nearest block-sized ancestor. An option's own
+  // short wrapper is skipped so every option in one question resolves to
+  // the same text. Walks deep: real Ashby markup nests options 5+ levels
+  // below their question container, and stops at FORM/BODY so the whole
+  // form is never grabbed as "the question".
   const norm = (n) => (n.innerText || '').replace(/\\s+/g, ' ').trim();
-  let n = el.parentElement, fallback = '';
-  for (let i = 0; i < 4 && n; i++, n = n.parentElement) {
+  let n = el.parentElement, fallback = '', qtext = '';
+  for (let i = 0; i < 10 && n && n.tagName !== 'FORM' && n.tagName !== 'BODY';
+       i++, n = n.parentElement) {
     const t = norm(n);
-    if (t.length < 25 || t.length > 1200) continue;
-    if (/how did you hear/i.test(t)) return t;
-    if (!fallback) fallback = t;
+    if (!qtext && /how did you hear/i.test(t) && t.length < 5000) qtext = t;
+    if (!fallback && t.length >= 25 && t.length <= 1200) fallback = t;
+    if (qtext && fallback) break;
   }
-  return fallback;
+  return qtext || fallback;
 }"""
 
 JS_LABEL_CLICK = "(el) => { const t = (el.labels && el.labels[0]) || el; t.click(); }"
@@ -122,6 +126,27 @@ JS_LABEL_CLICK = "(el) => { const t = (el.labels && el.labels[0]) || el; t.click
 # "If you selected 'Other' above, please specify..." — only relevant when
 # the Other option is actually checked.
 OTHER_COND_RE = re.compile(r'if you selected.*other', re.I)
+
+# A field is "someone else's name / org name" (left blank, never parked)
+# only when it ASKS FOR a name/identity of another party or org — not
+# merely because the question mentions a company. ("EliseAI is an
+# in-office company. Are you comfortable...?" is about HER comfort, not
+# a company name.)
+_OTHER_PARTY_RE = re.compile(
+    r"referr|recruit|employee|colleague|friend|manager|supervisor", re.I)
+_ORG_RE = re.compile(
+    r"compan|employer|universit|school|college|organi[sz]ation", re.I)
+_NAME_REQUEST_RE = re.compile(
+    r"\bname\b|\bwho\b|specify|list their|contacted by", re.I)
+
+
+def _is_referrer_field(label: str) -> bool:
+    """True when the field asks for another person/org's name (referrer,
+    recruiter, employee, company name, ...). Such fields stay blank."""
+    low = (label or "").lower()
+    if not _NAME_REQUEST_RE.search(low):
+        return False
+    return bool(_OTHER_PARTY_RE.search(low) or _ORG_RE.search(low))
 
 
 class GenericAdapter:
@@ -135,6 +160,10 @@ class GenericAdapter:
              pay_range: tuple[int, int] | None = None) -> FillResult:
         result = FillResult()
         seen_radio_groups: set[str] = set()
+        # Normalized labels of conditional "Other, please specify" fields
+        # already skipped: Ashby can render the same conditional field
+        # twice (visible + hidden template); skip every copy.
+        other_skipped: set[str] = set()
         standing = standing or {}
 
         # Ashby-style pages open on an Overview tab; click through to the
@@ -154,9 +183,12 @@ class GenericAdapter:
                     continue
 
                 # Conditional "if you selected Other..." box: skip unless the
-                # Other option is actually checked.
+                # Other option is actually checked. Every copy is skipped
+                # (Ashby sometimes renders the conditional field twice).
                 if ctype not in ("radio", "checkbox") and OTHER_COND_RE.search(label):
-                    if not self._other_option_checked(page):
+                    norm_label = re.sub(r"\s+", " ", label).strip().lower()
+                    if norm_label in other_skipped or not self._other_option_checked(page):
+                        other_skipped.add(norm_label)
                         result.notes.append(
                             f"skipped (Other not selected): {label[:60]}")
                         continue
@@ -201,7 +233,7 @@ class GenericAdapter:
                             label=label,
                             kind=kind,
                             control=ctype,
-                            options=self._group_options(page, el),
+                            options=self._group_options(page, el, ctx),
                         )
                     )
                     continue
@@ -227,7 +259,10 @@ class GenericAdapter:
                         result.filled.append(f"{label} -> [standing answer]")
                         continue
                     # Someone else's name / org name: leave blank, never park.
-                    if verdict == "unknown" and is_other_name(label):
+                    # Narrow check: only fields that actually ASK FOR the
+                    # name (referrer, recruiter, company name...), not
+                    # ordinary questions that merely mention a company.
+                    if verdict == "unknown" and _is_referrer_field(label):
                         result.notes.append(f"left blank (no referrer): {label}")
                         continue
                     kind = f"sensitive:{detail}" if verdict == "sensitive" else "unknown"
@@ -461,12 +496,31 @@ class GenericAdapter:
             return get("open_to_relocate")
         return None
 
-    def _group_options(self, page, el) -> list[str]:
+    def _group_options(self, page, el, ctx: str = "") -> list[str]:
+        """Option texts for a radio/checkbox group.
+
+        Name-less Ashby-style groups (grouped by question text) list the
+        options found in the same question container.
+        """
         name = el.get_attribute("name") or ""
-        if not name:
-            return []
-        return page.evaluate(
-            """(n) => Array.from(document.querySelectorAll(`input[type=radio][name="${n}"]`))
-                 .map(r => (r.labels[0]?.innerText || r.value || '').trim()).filter(Boolean)""",
-            name,
-        )
+        if name:
+            return page.evaluate(
+                """(n) => Array.from(document.querySelectorAll(`input[type=radio][name="${n}"]`))
+                     .map(r => (r.labels[0]?.innerText || r.value || '').trim()).filter(Boolean)""",
+                name,
+            )
+        if ctx:
+            key = ctx[:80]
+            opts: list[str] = []
+            for b in page.query_selector_all(
+                    "input[type=checkbox], input[type=radio]"):
+                try:
+                    if (b.evaluate(GROUP_CTX_JS) or "")[:80] != key:
+                        continue
+                    t = (b.evaluate(self.OPT_TEXT_JS) or "").strip()
+                    if t and t not in opts:
+                        opts.append(t)
+                except Exception:  # noqa: BLE001 - one bad option never kills it
+                    continue
+            return opts
+        return []

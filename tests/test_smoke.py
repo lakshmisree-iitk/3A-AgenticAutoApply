@@ -117,8 +117,84 @@ def test_ashby_style_form():
     print(f"ashby-style: OK (filled={len(result.filled)}, needs={len(result.needs)})")
 
 
+def test_ashby_realshape_form():
+    """Real Ashby DOM shape (seen 2026-09-23): deeply nested name-less
+    checkboxes, Yes/No as <button> pills, the conditional Other field
+    rendered twice. With standing answers everything resolves; without
+    them the checkbox group parks as ONE need and the in-office question
+    parks (never silently blanked)."""
+    from applybot import browser as B
+    from applybot.adapters.generic import GenericAdapter
+    from applybot.config import Profile
+
+    profile = Profile(full_name="Lakshmisree Iyengar",
+                      email="lakshmisreeiyengar@gmail.com",
+                      phone="470-923-7530",
+                      location="Harrison, New Jersey, USA",
+                      linkedin="https://www.linkedin.com/in/lakshmisree-iyengar")
+    standing = {
+        "how_heard": "LinkedIn",
+        "us_work_authorized": "Yes",
+        "requires_sponsorship": "Yes",
+        "open_to_relocate": "Yes",
+        "work_arrangement": "I am comfortable with in-office, hybrid, or remote work",
+        "in_office_ok": "Yes",
+        "compensation_strategy": "midpoint_of_posted_range",
+    }
+    fixture = Path(__file__).parent / "fixtures" / "ashby_realshape.html"
+    resume = Path(__file__).parent / "fixtures" / "resume.txt"
+    resume.write_text("fake resume", encoding="utf-8")
+
+    with B.launch(headless=True) as page:
+        page.goto(fixture.as_uri())
+        result = GenericAdapter().fill(page, profile, str(resume), {},
+                                       standing, (150000, 230000))
+
+        # checkbox group resolved as one question: LinkedIn checked, rest not
+        assert page.locator("#cb0").is_checked(), "LinkedIn not checked"
+        for i in range(1, 12):
+            assert not page.locator(f"#cb{i}").is_checked(), f"cb{i} wrongly checked"
+        # standing answers applied
+        assert page.locator("#sp").input_value() == "Yes"
+        assert page.locator("#comp").input_value() == "$190,000"
+        assert "in-office" in page.locator("#off").input_value()
+        filled = " ".join(result.filled).lower()
+        assert "legally authorized" in filled, result.filled  # Yes pill clicked
+        # recruiter box blank and never parked
+        assert page.locator("#rec").input_value() == ""
+        # conditional Other field skipped (both copies), not parked
+        assert page.locator("#other1").input_value() == ""
+        assert any("skipped (other not selected)" in n.lower()
+                   for n in result.notes), result.notes
+        kinds = {n.field_id: n.kind for n in result.needs}
+        assert not [k for k in kinds if "other" in k.lower()], kinds
+        assert "rec" not in kinds, kinds
+        assert not kinds, kinds  # fully clean with standing answers
+
+    # Without standing answers: the 12 checkboxes park as ONE grouped need
+    # (not 12), and the in-office question parks instead of being
+    # silently blanked as a "referrer" field.
+    with B.launch(headless=True) as page:
+        page.goto(fixture.as_uri())
+        result = GenericAdapter().fill(page, profile, str(resume), {},
+                                       None, (150000, 230000))
+        kinds = {n.field_id: n.kind for n in result.needs}
+        hear = [k for k in kinds if k.startswith("ctx:How did you hear")]
+        assert len(hear) == 1, kinds
+        assert len(result.needs) < 8, kinds  # grouped, not 12 separate
+        assert not page.locator("#cb0").is_checked()
+        assert page.locator("#rec").input_value() == ""  # still blanked
+        assert "rec" not in kinds, kinds
+        off = [n for n in result.needs if n.field_id == "off"]
+        assert off and off[0].kind == "unknown", kinds  # parked, not blanked
+        assert not any("left blank (no referrer)" in n and "in-office" in n
+                       for n in result.notes), result.notes
+    print("ashby-realshape: OK")
+
+
 if __name__ == "__main__":
     test_classifier()
     test_generic_adapter()
     test_ashby_style_form()
+    test_ashby_realshape_form()
     print("ALL TESTS PASSED")

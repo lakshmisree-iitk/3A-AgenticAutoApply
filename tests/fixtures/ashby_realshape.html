@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!-- Regression fixture: mirrors the real Ashby DOM seen 2026-09-23.
+     Checkboxes share no name/fieldset/legend; each option is nested 5+
+     levels below the question container; Yes/No pills are <button>s;
+     the conditional "Other, specify" field is rendered twice. -->
+<html><head><title>Real-shape Ashby form</title></head>
+<body>
+<form id="app">
+  <div><div><label for="nm">Name*</label><input id="nm" type="text"></div></div>
+  <div><div><label for="em">Email*</label><input id="em" type="email"></div></div>
+  <div><div><label for="cv">Resume*</label><input id="cv" type="file"></div></div>
+  <div><div><label for="ph">Phone Number*</label><input id="ph" type="tel"></div></div>
+  <div><div><label for="loc">Location*</label><input id="loc" type="text"></div></div>
+  <div><div><label for="li">LinkedIn Profile</label><input id="li" type="text"></div></div>
+
+  <div class="q">
+    <div class="qtext">How did you hear about EliseAI?*</div>
+    <div class="opts">
+      <div><div><div class="opt"><label><input id="cb0" type="checkbox" aria-label="LinkedIn"><span>LinkedIn</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb1" type="checkbox" aria-label="X"><span>X</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb2" type="checkbox" aria-label="Other social media"><span>Other social media or online community (eg., Instagram, Reddit, Youtube)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb3" type="checkbox" aria-label="Search engine"><span>Search engine, or AI assistant (e.g., Google, ChatGPT)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb4" type="checkbox" aria-label="Job board"><span>Job board (e.g. Wellfound, Indeed)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb5" type="checkbox" aria-label="Podcast"><span>Podcast, article, or other media</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb6" type="checkbox" aria-label="EliseAI event"><span>EliseAI event or conference</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb7" type="checkbox" aria-label="Outdoor ad"><span>Outdoor or transit advertisement (e.g., billboard, subway, BART)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb8" type="checkbox" aria-label="EliseAI employee"><span>EliseAI employee</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb9" type="checkbox" aria-label="Friend"><span>Friend or colleague (word of mouth)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb10" type="checkbox" aria-label="Recruiter outreach"><span>Recruiter outreach (EliseAI or external agency)</span></label></div></div></div>
+      <div><div><div class="opt"><label><input id="cb11" type="checkbox" aria-label="Other"><span>Other (please specify)</span></label></div></div></div>
+    </div>
+  </div>
+
+  <div>
+    <div id="otherq">If you selected "Other" above please specify how you heard about EliseAI.</div>
+    <textarea id="other1" placeholder="Type here..." aria-labelledby="otherq"></textarea>
+  </div>
+  <div style="display:none">
+    <textarea id="other2" placeholder="Type here..." aria-labelledby="otherq"></textarea>
+  </div>
+
+  <div>
+    <div id="recq">If you were contacted by a recruiter or a current/former employee, please specify who.</div>
+    <input id="rec" type="text" placeholder="Type here..." aria-labelledby="recq">
+  </div>
+
+  <div>
+    <div class="qtext">Are you legally authorized to work in the United States?*</div>
+    <div><button type="button" id="wa_yes">Yes</button><button type="button" id="wa_no">No</button></div>
+  </div>
+
+  <div>
+    <div id="spq">Will you now, or in the future, require sponsorship for employment visa status (e.g. H-1B, TN visa status)?*</div>
+    <textarea id="sp" placeholder="Type here..." aria-labelledby="spq"></textarea>
+  </div>
+
+  <div>
+    <div id="offq">EliseAI is an in-office company. Are you comfortable working from our office around 4-5 days per week?*</div>
+    <input id="off" type="text" placeholder="Type here..." aria-labelledby="offq">
+  </div>
+
+  <div>
+    <div id="cq">Please provide a range of your compensation expectations.*</div>
+    <input id="comp" type="text" placeholder="Type here..." aria-labelledby="cq">
+  </div>
+
+  <button type="submit">Submit Application</button>
+</form>
+</body></html>
