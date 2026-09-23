@@ -24,6 +24,7 @@ class Profile:
     state: str = ""
     zip: str = ""
     country: str = ""
+    location: str = ""
     linkedin: str = ""
     website: str = ""
     github: str = ""
@@ -40,6 +41,7 @@ class JobSpec:
     url: str
     resume_pdf: str
     ats: str = "generic"  # adapter hint: generic | greenhouse | lever | ashby ...
+    pay_range: tuple[int, int] | None = None  # posted (min, max), for comp strategy
 
     @classmethod
     def load(cls, path: str | Path) -> "JobSpec":
@@ -50,6 +52,8 @@ class JobSpec:
         resume = Path(data["resume_pdf"])
         if not resume.exists():
             raise ValueError(f"resume_pdf does not exist: {resume}")
+        pr = data.get("pay_range")
+        pay = (int(pr[0]), int(pr[1])) if pr else None
         return cls(
             id=str(data["id"]),
             company=str(data["company"]),
@@ -57,6 +61,7 @@ class JobSpec:
             url=str(data["url"]),
             resume_pdf=str(resume.resolve()),
             ats=str(data.get("ats", "generic")),
+            pay_range=pay,
         )
 
 
@@ -77,3 +82,17 @@ def load_profile(path: str | Path = "profile.yaml") -> Profile:
             "only safe contact fields are allowed here."
         )
     return Profile(**{k: str(v or "") for k, v in data.items() if k in known})
+
+
+def load_standing(path: str | Path = "standing.yaml") -> dict:
+    """Sree's explicit standing answers to recurring sensitive questions.
+
+    Returns {} when the file is absent. Every value here was stated
+    explicitly by her and is meant to be reused across applications.
+    standing.yaml is git-ignored: never commit it.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {k: str(v or "") for k, v in data.items()}

@@ -13,7 +13,8 @@ import re
 SAFE_PATTERNS: dict[str, list[str]] = {
     "first_name": [r"\bfirst name\b", r"\bgiven name\b", r"\bforename\b"],
     "last_name": [r"\blast name\b", r"\bsurname\b", r"\bfamily name\b"],
-    "full_name": [r"\bfull name\b", r"\byour name\b", r"\bapplicant name\b"],
+    "full_name": [r"\bfull name\b", r"\byour name\b", r"\bapplicant name\b",
+                  r"\bname\b"],
     "email": [r"\bemail\b", r"\be-mail\b"],
     "phone": [r"\bphone\b", r"\bmobile\b", r"\btelephone\b", r"\btel\b"],
     "address": [r"\bstreet address\b", r"\baddress line", r"\bmailing address\b"],
@@ -21,10 +22,21 @@ SAFE_PATTERNS: dict[str, list[str]] = {
     "state": [r"\bstate\b", r"\bprovince\b"],
     "zip": [r"\bzip\b", r"\bpostal code\b", r"\bpostcode\b"],
     "country": [r"\bcountry\b"],
+    "location": [r"\blocation\b"],
     "linkedin": [r"linkedin"],
     "website": [r"\bwebsite\b", r"\bportfolio\b", r"\bpersonal site\b"],
     "github": [r"github"],
 }
+
+# A bare "name" label must NOT match when the field asks for someone ELSE's
+# name (referrer, recruiter, ...) or an organization's name. Those become
+# needs_input instead of taking the applicant's name.
+NAME_EXCLUSIONS = [
+    r"referr", r"recruit", r"employee", r"friend", r"colleague",
+    r"their name", r"manager", r"supervisor",
+    r"company", r"employer", r"university", r"school", r"college",
+]
+_COMPILED_NAME_EXCL = [re.compile(p) for p in NAME_EXCLUSIONS]
 
 # category -> regexes; a match means NEVER auto-answer
 SENSITIVE_PATTERNS: dict[str, list[str]] = {
@@ -104,6 +116,8 @@ def classify(label: str) -> tuple[str, str | None]:
         if any(p.search(text) for p in patterns):
             return "sensitive", category
     for key, patterns in _COMPILED_SAFE.items():
+        if key == "full_name" and any(p.search(text) for p in _COMPILED_NAME_EXCL):
+            continue  # someone else's name, or an organization's name
         if any(p.search(text) for p in patterns):
             return "safe", key
     return "unknown", None

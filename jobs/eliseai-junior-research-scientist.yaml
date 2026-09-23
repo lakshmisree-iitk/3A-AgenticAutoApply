@@ -6,3 +6,5 @@ url: https://jobs.ashbyhq.com/EliseAI/54f71abf-9184-4b4a-8d41-43ebf1600eba
 # Fix this to where you saved the tailored resume on your machine:
 resume_pdf: ~/Downloads/EliseAI_Junior_Research_Scientist_Resume.pdf
 ats: generic
+# Posted pay range (from the listing); the bot fills the midpoint.
+pay_range: [150000, 230000]

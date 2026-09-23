@@ -18,7 +18,7 @@ from pathlib import Path
 
 from applybot import browser as B
 from applybot.adapters import pick
-from applybot.config import JobSpec, load_profile
+from applybot.config import JobSpec, load_profile, load_standing
 from applybot.state import Store
 
 SUBMIT_LABELS = ["submit application", "submit"]
@@ -44,6 +44,7 @@ class Runner:
         """
         job = JobSpec.load(job_path)
         profile = load_profile()
+        standing = load_standing()
         run_dir = self.store.run_dir(job.id)
         log = (run_dir / "run.log").open("w", encoding="utf-8")
 
@@ -74,7 +75,8 @@ class Runner:
                 adapter = pick(page, job.ats)
                 say(f"adapter: {adapter.name}")
                 answered = data.get("answers", {})
-                result = adapter.fill(page, profile, job.resume_pdf, answered)
+                result = adapter.fill(page, profile, job.resume_pdf, answered,
+                                      standing, job.pay_range)
 
                 say(f"filled {len(result.filled)} fields; "
                     f"{len(result.needs)} need input; "
@@ -177,8 +179,10 @@ class Runner:
                 page.wait_for_timeout(3000)
                 # re-fill to be safe (idempotent), then submit
                 profile = load_profile()
+                standing = load_standing()
                 adapter = pick(page, job.ats)
-                adapter.fill(page, profile, job.resume_pdf, data.get("answers", {}))
+                adapter.fill(page, profile, job.resume_pdf,
+                             data.get("answers", {}), standing, job.pay_range)
                 self._do_submit(page, job, run_dir, say)
         except Exception as exc:  # noqa: BLE001
             self.store.transition(job.id, "failed", str(exc)[:500])

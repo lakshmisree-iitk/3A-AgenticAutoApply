@@ -208,5 +208,6 @@ __marimo__/
 
 # applybot: personal data, never commit
 profile.yaml
+standing.yaml
 state/
 runs/

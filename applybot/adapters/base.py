@@ -33,6 +33,13 @@ class Adapter(Protocol):
         """True if this adapter handles the current page."""
         ...
 
-    def fill(self, page, profile, resume_pdf: str, answered: dict) -> FillResult:
-        """Fill safe fields, upload resume, collect needs. Never submits."""
+    def fill(self, page, profile, resume_pdf: str, answered: dict,
+             standing: dict | None = None,
+             pay_range: tuple[int, int] | None = None) -> FillResult:
+        """Fill safe fields, upload resume, collect needs. Never submits.
+
+        standing: the user's explicit standing answers (from standing.yaml);
+        applied only to clearly matching questions. pay_range: the job's
+        posted (min, max) pay, used for the compensation strategy.
+        """
         ...

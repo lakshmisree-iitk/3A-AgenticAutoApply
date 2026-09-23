@@ -1,0 +1,28 @@
+# Standing answers: Sree's explicit answers to recurring sensitive questions.
+# Copy to standing.yaml and fill in. The bot applies these automatically,
+# so ONLY put answers here that she stated explicitly and wants reused
+# across applications. Leave a key empty ("") to keep that question in
+# the needs_input queue every time. standing.yaml is git-ignored.
+
+# "How did you hear about us?" -> which option to check
+how_heard: ""
+
+# "Are you legally authorized to work in the US?" (Yes/No)
+us_work_authorized: ""
+
+# "Will you now or in the future require sponsorship?" -> her answer
+# (empty = ask every time)
+requires_sponsorship: ""
+
+# "Are you willing to relocate?" (Yes/No)
+open_to_relocate: ""
+
+# In-office / hybrid / remote comfort: text for open-text questions
+work_arrangement: ""
+
+# "Are you comfortable working in-office N days/week?" (Yes/No)
+in_office_ok: ""
+
+# Compensation: "midpoint_of_posted_range" fills the middle of the job's
+# posted pay range (from the job YAML's pay_range). Empty = ask every time.
+compensation_strategy: ""

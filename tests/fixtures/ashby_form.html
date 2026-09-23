@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><title>Test Application Form (Ashby-style)</title></head>
+<body>
+<h1>Apply: Junior Research Scientist</h1>
+<form id="app">
+  <label for="nm">Name*</label>
+  <input id="nm" name="name" type="text">
+
+  <label for="em">Email*</label>
+  <input id="em" name="email" type="email">
+
+  <label for="cv">Resume*</label>
+  <input id="cv" name="resume" type="file">
+
+  <label for="ph">Phone Number*</label>
+  <input id="ph" name="phone" type="tel">
+
+  <label for="loc">Location*</label>
+  <input id="loc" name="location" type="text">
+
+  <label for="li">LinkedIn Profile</label>
+  <input id="li" name="linkedin" type="text">
+
+  <fieldset>
+    <legend>How did you hear about EliseAI?</legend>
+    <label><input type="checkbox" name="source" value="linkedin"> LinkedIn</label>
+    <label><input type="checkbox" name="source" value="jobboard"> Job board</label>
+  </fieldset>
+  <label for="ref">If you were referred by an EliseAI employee, please list their name</label>
+  <input id="ref" name="referrer_name" type="text">
+
+  <fieldset>
+    <legend>Are you legally authorized to work in the United States?</legend>
+    <label><input type="radio" name="work_auth" value="yes"> Yes</label>
+    <label><input type="radio" name="work_auth" value="no"> No</label>
+  </fieldset>
+
+  <label for="sp">Will you now, or in the future, require sponsorship for employment visa status (e.g. H-1B, TN visa...)?</label>
+  <input id="sp" name="sponsorship" type="text">
+
+  <label for="off">EliseAI is an in-office company. Are you comfortable working from our office around 4-5 days per week?</label>
+  <input id="off" name="office_comfort" type="text">
+
+  <label for="comp">Please provide a range of your compensation expectations.*</label>
+  <input id="comp" name="compensation" type="text">
+
+  <button type="submit">Submit Application</button>
+</form>
+</body></html>
