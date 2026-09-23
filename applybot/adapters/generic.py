@@ -10,6 +10,15 @@ from __future__ import annotations
 import re
 
 from applybot.adapters.base import FillResult, Need
+from applybot.perceive import (
+    GROUP_CTX_JS,
+    JS_LABEL_CLICK,
+    LABEL_JS,
+    OPTIONS_JS,
+    OPT_TEXT_JS,
+    VISIBLE_JS,
+    _group_options as _perceive_group_options,
+)
 from applybot.sensitive import classify
 
 
@@ -60,68 +69,6 @@ def _reveal_form(page) -> None:
     except Exception:  # noqa: BLE001 - form genuinely absent; fill reports it
         pass
 
-LABEL_JS = """(el) => {
-  const label = el.id ? document.querySelector(`label[for="${el.id}"]`) : null;
-  const wrap = el.closest('label');
-  const fieldset = el.closest('fieldset');
-  const legend = fieldset ? fieldset.querySelector('legend') : null;
-  const lb = el.getAttribute('aria-labelledby') || '';
-  const lbText = lb.split(/\\s+/).map(id => {
-    const n = id && document.getElementById(id);
-    return n ? n.innerText : '';
-  }).join(' ');
-  return [
-    el.getAttribute('aria-label') || '',
-    lbText,
-    el.getAttribute('placeholder') || '',
-    label ? label.innerText : '',
-    legend ? legend.innerText : '',
-    wrap ? wrap.innerText : '',
-    el.getAttribute('name') || '',
-    el.id || ''
-  ].join(' ').replace(/\\s+/g, ' ').trim();
-}"""
-
-OPTIONS_JS = """(el) => {
-  if (el.tagName === 'SELECT')
-    return Array.from(el.options).map(o => o.text.trim()).filter(Boolean);
-  return [];
-}"""
-
-VISIBLE_JS = """(el) => {
-  const vis = (n) => {
-    const r = n.getBoundingClientRect();
-    const s = window.getComputedStyle(n);
-    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
-  };
-  if (vis(el)) return true;
-  // Ashby-style: visually-hidden input driven by a visible label pill.
-  const lab = el.labels && el.labels[0];
-  return !!(lab && vis(lab));
-}"""
-
-GROUP_CTX_JS = """(el) => {
-  // Question text near a control, for grouping options that share no
-  // fieldset/name (e.g. Ashby checkbox lists) and for standing-answer
-  // matching. A targeted known-question pattern wins at any reasonable
-  // size; otherwise the nearest block-sized ancestor. An option's own
-  // short wrapper is skipped so every option in one question resolves to
-  // the same text. Walks deep: real Ashby markup nests options 5+ levels
-  // below their question container, and stops at FORM/BODY so the whole
-  // form is never grabbed as "the question".
-  const norm = (n) => (n.innerText || '').replace(/\\s+/g, ' ').trim();
-  let n = el.parentElement, fallback = '', qtext = '';
-  for (let i = 0; i < 10 && n && n.tagName !== 'FORM' && n.tagName !== 'BODY';
-       i++, n = n.parentElement) {
-    const t = norm(n);
-    if (!qtext && /how did you hear/i.test(t) && t.length < 5000) qtext = t;
-    if (!fallback && t.length >= 25 && t.length <= 1200) fallback = t;
-    if (qtext && fallback) break;
-  }
-  return qtext || fallback;
-}"""
-
-JS_LABEL_CLICK = "(el) => { const t = (el.labels && el.labels[0]) || el; t.click(); }"
 
 # "If you selected 'Other' above, please specify..." — only relevant when
 # the Other option is actually checked.
@@ -155,6 +102,11 @@ class GenericAdapter:
     def detect(self, page) -> bool:
         return True  # fallback adapter
 
+    def prepare(self, page) -> None:
+        # Ashby-style pages open on an Overview tab; click through to the
+        # real application form (and clear any cookie banner) first.
+        _reveal_form(page)
+
     def fill(self, page, profile, resume_pdf: str, answered: dict,
              standing: dict | None = None,
              pay_range: tuple[int, int] | None = None) -> FillResult:
@@ -166,9 +118,7 @@ class GenericAdapter:
         other_skipped: set[str] = set()
         standing = standing or {}
 
-        # Ashby-style pages open on an Overview tab; click through to the
-        # real application form (and clear any cookie banner) first.
-        _reveal_form(page)
+        self.prepare(page)
 
         controls = page.query_selector_all(
             "input, textarea, select"
@@ -233,7 +183,7 @@ class GenericAdapter:
                             label=label,
                             kind=kind,
                             control=ctype,
-                            options=self._group_options(page, el, ctx),
+                            options=_perceive_group_options(page, el, ctype, ctx),
                         )
                     )
                     continue
@@ -310,13 +260,6 @@ class GenericAdapter:
             el.fill(str(value))
 
     # -- standing answers (the user's explicit, reusable answers) ---------
-    OPT_TEXT_JS = """(b) => {
-      const w = b.closest('label');
-      const lab = (b.labels && b.labels[0]) ? b.labels[0].innerText : '';
-      return ((w ? w.innerText : '') + ' ' + lab + ' ' + (b.value || '') + ' '
-              + (b.getAttribute('aria-label') || '')).replace(/\\s+/g, ' ').trim();
-    }"""
-
     def _apply_standing_group(self, page, el, ctype: str, label: str, ctx: str,
                               verdict: str, detail: str | None,
                               standing: dict, result) -> bool:
@@ -348,7 +291,7 @@ class GenericAdapter:
             if not want:
                 return False
             for b in boxes:
-                t = (b.evaluate(self.OPT_TEXT_JS) or "").lower()
+                t = (b.evaluate(OPT_TEXT_JS) or "").lower()
                 if want in t:
                     try:
                         try:
@@ -400,7 +343,7 @@ class GenericAdapter:
         """True when an 'Other' checkbox option is currently checked."""
         try:
             for b in page.query_selector_all("input[type=checkbox]"):
-                t = (b.evaluate(self.OPT_TEXT_JS) or "").lower()
+                t = (b.evaluate(OPT_TEXT_JS) or "").lower()
                 if "other" in t:
                     try:
                         if b.is_checked():
@@ -495,32 +438,3 @@ class GenericAdapter:
         if "relocat" in low:
             return get("open_to_relocate")
         return None
-
-    def _group_options(self, page, el, ctx: str = "") -> list[str]:
-        """Option texts for a radio/checkbox group.
-
-        Name-less Ashby-style groups (grouped by question text) list the
-        options found in the same question container.
-        """
-        name = el.get_attribute("name") or ""
-        if name:
-            return page.evaluate(
-                """(n) => Array.from(document.querySelectorAll(`input[type=radio][name="${n}"]`))
-                     .map(r => (r.labels[0]?.innerText || r.value || '').trim()).filter(Boolean)""",
-                name,
-            )
-        if ctx:
-            key = ctx[:80]
-            opts: list[str] = []
-            for b in page.query_selector_all(
-                    "input[type=checkbox], input[type=radio]"):
-                try:
-                    if (b.evaluate(GROUP_CTX_JS) or "")[:80] != key:
-                        continue
-                    t = (b.evaluate(self.OPT_TEXT_JS) or "").strip()
-                    if t and t not in opts:
-                        opts.append(t)
-                except Exception:  # noqa: BLE001 - one bad option never kills it
-                    continue
-            return opts
-        return []

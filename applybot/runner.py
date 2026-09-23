@@ -19,6 +19,7 @@ from pathlib import Path
 from applybot import browser as B
 from applybot.adapters import pick
 from applybot.config import JobSpec, load_profile, load_standing
+from applybot.perceive import snapshot_form
 from applybot.state import Store
 
 SUBMIT_LABELS = ["submit application", "submit"]
@@ -188,6 +189,33 @@ class Runner:
             self.store.transition(job.id, "failed", str(exc)[:500])
             print(f"{job_id}: submit failed: {exc}")
         return self.store.load(job_id)
+
+    # -- snapshot (Phase 1 perceive) --------------------------------------
+    def snapshot(self, job_path: str, headless: bool = True) -> dict:
+        """Read-only question inventory of the form: fills nothing, submits
+        nothing. One page = one snapshot; the adapter's prepare() handles
+        page navigation (Ashby tab click, etc.)."""
+        job = JobSpec.load(job_path)
+        run_dir = self.store.run_dir(job.id)
+        with B.launch(headless=headless) as page:
+            page.goto(job.url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            blocker = B.detect_blockers(page)
+            if blocker:
+                print(f"{blocker}: {job.url}")
+                return {"blocked": blocker, "questions": []}
+            adapter = pick(page, job.ats)
+            adapter.prepare(page)
+            inv = snapshot_form(page)
+        out = run_dir / "snapshot.json"
+        out.write_text(json.dumps(inv, indent=2), encoding="utf-8")
+        n = len(inv["questions"])
+        print(f"snapshot: {n} questions -> {out}")
+        for q in inv["questions"]:
+            kinds = sorted({c["kind"] for c in q["controls"]})
+            req = " (required)" if q["required"] else ""
+            print(f"  - {q['question'][:80]}{req} [{', '.join(kinds)}]")
+        return inv
 
     def _do_submit(self, page, job, run_dir, say) -> None:
         """Click submit in the live form and verify a confirmation marker."""

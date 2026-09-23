@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--park", action="store_true",
                    help="stop at the review screen instead of auto-submitting")
 
+    p = sub.add_parser("snapshot",
+                       help="read-only question inventory of the form (fills nothing)")
+    p.add_argument("--job", required=True, help="path to job spec yaml/json")
+    p.add_argument("--headed", action="store_true", help="show the browser")
+
     p = sub.add_parser("status", help="show state and open questions")
     p.add_argument("--job-id", required=True)
 
@@ -75,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "apply":
         runner.apply(args.job, headless=not args.headed,
                      auto_submit=not args.park)
+        return 0
+
+    if args.cmd == "snapshot":
+        runner.snapshot(args.job, headless=not args.headed)
         return 0
 
     if args.cmd == "status":

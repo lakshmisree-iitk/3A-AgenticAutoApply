@@ -192,9 +192,64 @@ def test_ashby_realshape_form():
     print("ashby-realshape: OK")
 
 
+def test_snapshot():
+    """Phase 1 perceive: question inventory of the Ashby real-shape form.
+
+    Fills nothing; groups nameless checkboxes, Yes/No pill buttons and
+    text controls under their question text.
+    """
+    from applybot import browser as B
+    from applybot.perceive import snapshot_form
+
+    fixture = Path(__file__).parent / "fixtures" / "ashby_realshape.html"
+    with B.launch(headless=True) as page:
+        page.goto(fixture.as_uri())
+        inv = snapshot_form(page)
+
+    qs = inv["questions"]
+    assert qs, "no questions inventoried"
+    labels = " ".join(q["question"] for q in qs).lower()
+
+    # safe contact fields are separate questions
+    for probe in ["name*", "email*", "phone number*", "location*", "linkedin"]:
+        assert probe in labels, probe
+
+    # how-did-you-hear-about: one group, 12 checkbox controls
+    hear = next(q for q in qs if "how did you hear" in q["question"].lower())
+    assert len(hear["controls"]) == 12, len(hear["controls"])
+    assert {c["kind"] for c in hear["controls"]} == {"checkbox"}
+    assert any("LinkedIn" in o for o in hear["controls"][0]["options"])
+    assert len(hear["controls"][0]["options"]) == 12
+    assert hear["required"]
+
+    # Yes/No pill toggles group under their question
+    wa = next(q for q in qs if "legally authorized" in q["question"].lower())
+    assert [c["kind"] for c in wa["controls"]] == ["button", "button"]
+    assert wa["controls"][0]["options"] == ["Yes", "No"]
+
+    # sensitive questions are present in the inventory
+    for probe in ["sponsorship", "compensation expectations",
+                  "in-office company", "please specify who"]:
+        assert probe in labels, probe
+
+    # the hidden duplicate "Other specify" render is not inventoried
+    other = [q for q in qs
+             if "please specify how you heard" in q["question"].lower()]
+    assert len(other) == 1, len(other)
+    assert len(other[0]["controls"]) == 1
+
+    # resume file control is inventoried, submit button is not
+    file_q = next(q for q in qs
+                  if any(c["kind"] == "file" for c in q["controls"]))
+    assert file_q["controls"][0]["kind"] == "file"
+    assert not any("submit application" in q["question"].lower() for q in qs)
+
+    print(f"snapshot: OK ({len(qs)} questions)")
+
 if __name__ == "__main__":
     test_classifier()
     test_generic_adapter()
     test_ashby_style_form()
     test_ashby_realshape_form()
+    test_snapshot()
     print("ALL TESTS PASSED")
