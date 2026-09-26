@@ -6,15 +6,17 @@ against hard local guards, execute, re-snapshot, verify. Repeats until
 the form is done, blocked, or parked.
 
 Hard guards (in code, not in the prompt — the LLM cannot override):
-- No click on anything labeled submit/apply/send. Ever. The executor
-  refuses and logs it.
+- No click on anything labeled submit/apply/send, UNLESS the run was
+  started with the explicit --submit opt-in (allow_submit=True). The
+  executor refuses otherwise and logs it.
 - A fill the local classifier rates sensitive/unknown only executes
   when its evidence source is a standing or past answer. Otherwise the
   decision is downgraded to park, even if the LLM said fill.
 - Password/hidden inputs are never filled.
 - A fill with no value or no evidence source becomes park.
-- The loop always ends parked at review; submission is a separate
-  human-approved step (the existing approve/submit commands).
+- The loop ends parked at review unless --submit was given AND the
+  reasoner clicked submit as its final action; the click is then
+  verified against confirmation markers.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from applybot.perceive import (
     snapshot_form,
 )
 from applybot.reason import ReasonError, decide
+from applybot.runner import SUCCESS_MARKERS
 from applybot.sensitive import classify
 from applybot.state import Store
 
@@ -145,9 +148,12 @@ def _execute_fill(page, question: dict, control: dict,
     return f"unsupported kind '{kind}'"
 
 
-def _execute_click(page, action: dict) -> str:
+def _execute_click(page, action: dict, allow_submit: bool = False) -> str:
+    """Click a page action. Submit-labeled clicks execute only under the
+    explicit --submit opt-in; otherwise they are refused."""
     label = action.get("label", "")
-    if SUBMIT_RE.search(label):
+    is_submit = bool(SUBMIT_RE.search(label))
+    if is_submit and not allow_submit:
         raise GuardRefusal(f"refused click on '{label}': submit is never clicked")
     control_id = action.get("control_id") or ""
     el = None
@@ -171,7 +177,7 @@ def _execute_click(page, action: dict) -> str:
     el.scroll_into_view_if_needed()
     el.click()
     page.wait_for_timeout(2000)
-    return f"clicked '{label}'"
+    return "SUBMIT CLICKED" if is_submit else f"clicked '{label}'"
 
 
 def _snapshot_sig(snapshot: dict) -> str:
@@ -182,12 +188,17 @@ def _snapshot_sig(snapshot: dict) -> str:
 
 
 def run_agent(job_path: str, headless: bool = True,
-              reason_fn=None, max_steps: int = MAX_STEPS) -> dict:
-    """Run the generic agent loop. Always ends parked (never submits).
+              reason_fn=None, max_steps: int = MAX_STEPS,
+              allow_submit: bool = False,
+              user_data_dir: str | None = None) -> dict:
+    """Run the generic agent loop. Ends parked at review, unless
+    allow_submit=True (explicit --submit opt-in) and the reasoner clicks
+    submit as its final action — the click is then verified against
+    confirmation markers.
 
     reason_fn is injectable for tests: fn(snapshot, profile, standing,
-    job, past_answers, step) -> decision dict. Defaults to the Gemini
-    reasoner.
+    job, past_answers, step, allow_submit=...) -> decision dict. Defaults
+    to the Gemini reasoner.
     """
     job = JobSpec.load(job_path)
     profile = load_profile()
@@ -218,7 +229,8 @@ def run_agent(job_path: str, headless: bool = True,
         say(f"  PARKED [{control_id}]: {reason}")
 
     try:
-        with B.launch(headless=headless) as page:
+        with B.launch(headless=headless,
+                     user_data_dir=user_data_dir) as page:
             page.goto(job.url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
             blocker = B.detect_blockers(page)
@@ -240,6 +252,7 @@ def run_agent(job_path: str, headless: bool = True,
 
             last_sig = ""
             idle_steps = 0
+            submit_clicked = False
             for step in range(1, max_steps + 1):
                 say(f"\n--- step {step} ---")
                 snapshot = snapshot_form(page)
@@ -264,7 +277,7 @@ def run_agent(job_path: str, headless: bool = True,
                         snapshot, _profile_dict(profile), standing,
                         {"company": job.company, "role": job.role,
                          "pay_range": job.pay_range},
-                        past_answers, step)
+                        past_answers, step, allow_submit=allow_submit)
                 except ReasonError as exc:
                     say(f"reasoner error: {exc}")
                     park_field("reasoner", "reasoner error", str(exc)[:200])
@@ -334,18 +347,25 @@ def run_agent(job_path: str, headless: bool = True,
                     except Exception as exc:  # noqa: BLE001
                         say(f"  resume upload failed: {exc}")
 
-                # -- clicks (never submit) --
+                # -- clicks (submit only under the explicit opt-in) --
                 page_changed = False
                 for c in decision.get("clicks") or []:
                     try:
-                        result = _execute_click(page, c)
+                        result = _execute_click(page, c,
+                                                allow_submit=allow_submit)
                         say(f"  {result}")
                         acted = True
                         page_changed = True
+                        if result == "SUBMIT CLICKED":
+                            submit_clicked = True
+                            break  # nothing sensible to do after a submit
                     except GuardRefusal as exc:
                         say(f"  GUARD refusal: {exc}")
                 if page_changed:
                     page.wait_for_timeout(1500)
+
+                if submit_clicked:
+                    break  # go verify the submission below
 
                 if decision.get("page_done") and not acted:
                     say("reasoner reports the page is done.")
@@ -357,8 +377,26 @@ def run_agent(job_path: str, headless: bool = True,
                         say("nothing left to do: stopping.")
                         break
 
-            # -- end of loop: always park, never submit --
-            if parked:
+            # -- explicit submit opt-in: verify the click --
+            if submit_clicked:
+                say("\nSubmit clicked (--submit): verifying confirmation...")
+                page.wait_for_timeout(5000)
+                page.screenshot(path=str(run_dir / "submitted.png"),
+                                 full_page=True)
+                text = (page.content() or "").lower()
+                if any(m in text for m in SUCCESS_MARKERS):
+                    store.transition(job.id, "submitted",
+                                     "confirmation detected (--submit)")
+                    say(f"{job.id}: SUBMITTED and confirmed.")
+                else:
+                    store.transition(
+                        job.id, "failed",
+                        "submit clicked but no confirmation marker found; "
+                        f"check {run_dir / 'submitted.png'}")
+                    say(f"{job.id}: submit clicked but NOT confirmed "
+                        f"- check screenshot.")
+            # -- end of loop: park unless the submit above ran --
+            elif parked:
                 say(f"\nPARKED: {len(parked)} question(s) need input.")
                 data["needs"] = parked
                 store.save(job.id, data)

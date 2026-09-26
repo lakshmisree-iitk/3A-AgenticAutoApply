@@ -35,18 +35,18 @@ def _api_key() -> str:
     return key
 
 
-SYSTEM = """You are the reasoning brain of a job-application agent working for Sree (Lakshmisree Iyengar).
+SYSTEM_TEMPLATE = """You are the reasoning brain of a job-application agent working for Sree (Lakshmisree Iyengar).
 You NEVER touch the browser. You analyze a page snapshot and return the next actions as JSON.
 A separate runner executes only the actions you return, then shows you the new snapshot.
 
-GOAL: complete the job application form, then stop. You do not submit — submission is a separate human-approved step.
+{goal}
 
 HARD RULES:
 - Never invent facts. Every filled value must cite its evidence source: profile, standing (her explicit reusable answers), job_spec, or past_answer (answers she gave earlier on this application). No source -> park the question.
 - Sensitive questions (work authorization, sponsorship, citizenship/visa, EEO/demographic, background checks, compensation, attestations, anything asking for another person's identity) may ONLY be filled from standing or past_answer. Otherwise park.
 - Referrer / recruiter / employee-name fields: decision "blank". Do not fill, do not park.
 - Password, SSN, bank-account, or other credential fields: park, never fill.
-- Never return a click on anything labeled submit/apply/send. If the form looks complete, set page_done=true and stop.
+{submit_rule}
 - If the page shows a login wall, CAPTCHA, or no form at all: set blocked with the reason and stop. Do not attempt to bypass.
 - Prefer clicking visible actions (tabs, Next buttons) to reach the form over reporting blocked.
 - For choice controls (radio/checkbox/button pills), name the exact option text to select.
@@ -69,6 +69,29 @@ Return JSON only, exactly this schema:
 }
 Only include fields that need a decision now; omit fields that are already correctly filled.
 """
+
+
+def system_prompt(allow_submit: bool = False) -> str:
+    """The system prompt, with the submit rule switched by the explicit
+    --submit opt-in. Default (False) is the park-and-never-submit behavior."""
+    if allow_submit:
+        goal = ("GOAL: complete the job application form accurately, then submit it. "
+                "The user explicitly authorized this run to submit.")
+        submit_rule = ("- Return a click on the submit/apply/send control ONLY as the final action, "
+                       "when the form is fully complete and every field is verified correct. "
+                       "Never click it earlier, and never click it twice.")
+    else:
+        goal = ("GOAL: complete the job application form, then stop. "
+                "You do not submit \u2014 submission is a separate human-approved step.")
+        submit_rule = ("- Never return a click on anything labeled submit/apply/send. "
+                       "If the form looks complete, set page_done=true and stop.")
+    return (SYSTEM_TEMPLATE
+            .replace("{goal}", goal)
+            .replace("{submit_rule}", submit_rule))
+
+
+# Backwards-compatible default prompt: park, never submit.
+SYSTEM = system_prompt(False)
 
 
 def build_prompt(snapshot: dict, profile: dict, standing: dict,
@@ -126,10 +149,10 @@ def _call_gemini(system: str, prompt: str) -> dict:
 
 
 def decide(snapshot: dict, profile: dict, standing: dict, job: dict,
-           past_answers: dict, step: int) -> dict:
+           past_answers: dict, step: int, allow_submit: bool = False) -> dict:
     """One batched reasoning call over the snapshot. Returns the decision
     dict (schema above); missing keys get safe defaults."""
-    raw = _call_gemini(SYSTEM, build_prompt(
+    raw = _call_gemini(system_prompt(allow_submit), build_prompt(
         snapshot, profile, standing, job, past_answers, step))
     if not isinstance(raw, dict):
         raise ReasonError("Gemini decision was not a JSON object")

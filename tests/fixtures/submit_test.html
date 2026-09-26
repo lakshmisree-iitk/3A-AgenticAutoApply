@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><title>Submit test form</title></head>
+<body>
+<h1>Application</h1>
+<form>
+  <label>Full name <input name="fullname" type="text"></label>
+  <button type="button" id="submitBtn">Submit Application</button>
+</form>
+<script>
+document.getElementById('submitBtn').addEventListener('click', () => {
+  document.body.innerHTML = '<h1>Thank you for applying</h1>';
+});
+</script>
+</body>
+</html>

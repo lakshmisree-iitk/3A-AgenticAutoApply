@@ -99,7 +99,41 @@ python -m applybot apply --job jobs/eliseai-junior-research-scientist.yaml
 
 Every run is logged with screenshots under `runs/<job-id>/<timestamp>/`.
 
-## 3. Scaling to many jobs
+## 4. Agent loop with explicit submit (Sree's call, 2026-09-26)
+
+The generic agent loop (`agent` command) reasons over each page with the
+LLM and acts. By default it always parks at review and never submits.
+`--submit` is the explicit per-run opt-in that lets it click
+submit/apply as its final action — the click is verified against
+confirmation markers ("thank you for applying", etc.).
+
+For sites with a login wall (e.g. Apple), sign in yourself first — the
+bot never fills password fields:
+
+```bash
+source .venv/bin/activate
+export GEMINI_API_KEY="..."   # runtime only; never stored or committed
+
+# a. You sign in under a persistent profile (headed browser opens):
+python -m applybot signin --job jobs/apple-aiml-data-scientist-evaluation.yaml \
+  --profile ~/.applybot/apple
+#    -> sign in with your own account in the window, then press Enter here.
+
+# b. Dry run: fills everything, parks at review, never submits:
+python -m applybot agent --job jobs/apple-aiml-data-scientist-evaluation.yaml \
+  --headed --profile ~/.applybot/apple
+
+# c. Real run: --submit lets the agent click submit as its final action:
+python -m applybot agent --job jobs/apple-aiml-data-scientist-evaluation.yaml \
+  --headed --profile ~/.applybot/apple --submit
+```
+
+Rules that always hold:
+- Without `--submit`, the agent refuses every submit click (hard guard in
+  code, not just the prompt).
+- The `signin` profile dir keeps your login between runs on that machine.
+
+## 5. Scaling to many jobs
 
 ```bash
 # Add one YAML per job under jobs/, then loop:

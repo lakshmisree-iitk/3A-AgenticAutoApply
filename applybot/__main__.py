@@ -3,6 +3,16 @@
   init                     create profile.yaml from the example
   apply --job jobs/x.json  fill the form; auto-submits when clean
                            (--park to stop at review instead)
+  agent --job jobs/x.yaml [--park-like default] [--submit] [--profile DIR]
+                           run the generic perceive->reason->act->verify loop.
+                           Parks at review by default; --submit is the
+                           explicit opt-in that lets it click submit/apply
+                           (submits for real, verified against confirmation
+                           markers). --profile keeps a persistent browser
+                           profile so a manual sign-in survives between runs.
+  signin --job jobs/x.yaml --profile DIR
+                           open the job page in a persistent profile so YOU
+                           sign in yourself (the bot never touches passwords)
   status --job-id x        show current state + open questions
   answer --job-id x --answers '{"q1": "Yes"}'
                            record your explicit answers, then re-run with resume
@@ -41,11 +51,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--headed", action="store_true", help="show the browser")
 
     p = sub.add_parser("agent",
-                       help="run the generic agent loop (always parks at review; never submits)")
+                       help="run the generic agent loop (parks at review unless --submit)")
     p.add_argument("--job", required=True, help="path to job spec yaml/json")
     p.add_argument("--headed", action="store_true", help="show the browser")
     p.add_argument("--max-steps", type=int, default=12,
                    help="cap on perceive/reason/act cycles")
+    p.add_argument("--submit", action="store_true",
+                   help="explicit opt-in: allow the agent to click "
+                        "submit/apply at the end (submits for real)")
+    p.add_argument("--profile", default=None,
+                   help="persistent browser profile dir; keeps your "
+                        "sign-in between runs (use with signin first)")
+
+    p = sub.add_parser("signin",
+                       help="open the job page in a persistent profile so "
+                            "you can sign in yourself (the bot never fills "
+                            "passwords)")
+    p.add_argument("--job", required=True, help="path to job spec yaml/json")
+    p.add_argument("--profile", required=True,
+                   help="persistent browser profile dir to sign in under")
 
     p = sub.add_parser("status", help="show state and open questions")
     p.add_argument("--job-id", required=True)
@@ -92,7 +116,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "agent":
         from applybot.agent import run_agent
         run_agent(args.job, headless=not args.headed,
-                  max_steps=args.max_steps)
+                  max_steps=args.max_steps, allow_submit=args.submit,
+                  user_data_dir=args.profile)
+        return 0
+
+    if args.cmd == "signin":
+        from applybot.config import JobSpec
+        from applybot import browser as B
+        job = JobSpec.load(args.job)
+        with B.launch(headless=False,
+                      user_data_dir=args.profile) as page:
+            page.goto(job.url, wait_until="domcontentloaded", timeout=60000)
+            print(f"opened {job.url}")
+            print("Sign in yourself in this window — the bot never "
+                  "touches passwords or 2FA.")
+            input("Press Enter here once you are signed in and the "
+                  "application form is visible... ")
+        print("profile saved under", args.profile)
+        print("Now run: python -m applybot agent --job", args.job,
+              "--headed --profile", args.profile, "[--submit]")
         return 0
 
     if args.cmd == "snapshot":

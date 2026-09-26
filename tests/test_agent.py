@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from applybot.agent import run_agent
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ashby_realshape.html"
+SUBMIT_FIXTURE = Path(__file__).parent / "fixtures" / "submit_test.html"
 
 PROFILE_YAML = """\
 first_name: "Test"
@@ -62,7 +63,7 @@ def test_agent_guards_and_parks():
     answer is downgraded to park even though the mock said fill."""
     calls = []
 
-    def mock(snapshot, profile, standing, job, past_answers, step):
+    def mock(snapshot, profile, standing, job, past_answers, step, **_kw):
         calls.append(step)
         spons = _find_question(snapshot, "sponsorship")
         comp = _find_question(snapshot, "compensation")
@@ -114,7 +115,7 @@ def test_agent_guards_and_parks():
 def test_agent_refuses_submit_click():
     """A click on Submit Application is refused by the executor."""
 
-    def mock(snapshot, profile, standing, job, past_answers, step):
+    def mock(snapshot, profile, standing, job, past_answers, step, **_kw):
         return {"thinking": "test", "fields": [], "clicks": [
                     {"control_id": "", "label": "Submit Application",
                      "purpose": "malicious test"}],
@@ -134,7 +135,7 @@ def test_agent_refuses_submit_click():
 def test_agent_blocked():
     """A login wall / blocked report parks the job."""
 
-    def mock(snapshot, profile, standing, job, past_answers, step):
+    def mock(snapshot, profile, standing, job, past_answers, step, **_kw):
         return {"thinking": "test", "fields": [], "clicks": [],
                 "upload_resume": False,
                 "blocked": "login wall, no form visible",
@@ -147,8 +148,50 @@ def test_agent_blocked():
     print("agent blocked: OK")
 
 
+def _setup_submit(tmp: str) -> str:
+    """Job pointing at the minimal submit fixture (job id test-submit-job)."""
+    Path(tmp, "profile.yaml").write_text(PROFILE_YAML, encoding="utf-8")
+    Path(tmp, "standing.yaml").write_text("{}\n", encoding="utf-8")
+    resume = Path(tmp, "dummy.pdf")
+    resume.write_bytes(b"%PDF-1.4 dummy")
+    job = Path(tmp, "job.yaml")
+    job.write_text(
+        JOB_YAML.replace("test-agent-job", "test-submit-job").format(
+            url=SUBMIT_FIXTURE.resolve().as_uri(), resume=resume),
+        encoding="utf-8")
+    return str(job)
+
+
+def test_agent_submit_opt_in():
+    """With allow_submit=True, a submit click executes and a confirmation
+    marker transitions the job to submitted."""
+
+    def mock(snapshot, profile, standing, job, past_answers, step, **_kw):
+        return {"thinking": "test", "fields": [], "clicks": [
+                    {"control_id": "", "label": "Submit Application",
+                     "purpose": "final submit"}],
+                "upload_resume": False, "blocked": None,
+                "page_done": False, "notes": ""}
+
+    tmp = tempfile.mkdtemp(prefix="agent-test-")
+    cwd = os.getcwd()
+    os.chdir(tmp)
+    try:
+        result = run_agent(_setup_submit(tmp), headless=True,
+                           reason_fn=mock, max_steps=4, allow_submit=True)
+    finally:
+        os.chdir(cwd)
+    log = Path(tmp) / "runs" / "test-submit-job"
+    agent_log = next(log.rglob("agent.log")).read_text(encoding="utf-8")
+    assert "SUBMIT CLICKED" in agent_log, agent_log[-2000:]
+    assert "SUBMITTED and confirmed" in agent_log, agent_log[-2000:]
+    assert result["state"] == "submitted", result["state"]
+    print("agent submit opt-in: OK")
+
+
 if __name__ == "__main__":
     test_agent_guards_and_parks()
     test_agent_refuses_submit_click()
     test_agent_blocked()
+    test_agent_submit_opt_in()
     print("AGENT TESTS PASSED")
